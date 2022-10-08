@@ -1,18 +1,13 @@
-use bitcoin::Network;
-use std::path::Path;
-use std::sync::Arc;
-//use std::{alloc::GlobalAlloc, collections::HashMap};
 use bitcoin::hashes::sha256;
+use bitcoin::Network;
 
 use anyhow::{anyhow, Result};
-use fedimint_sled::SledDb;
 use lazy_static::lazy_static;
 use lightning_invoice::{Invoice, InvoiceDescription};
-use mint_client::api::WsFederationConnect;
 use mint_client::utils::network_to_currency;
 use tokio::runtime;
 
-use crate::client::{Client, ConnectionStatus};
+use crate::client::ConnectionStatus;
 use crate::client_manager::ClientManager;
 use crate::init_tracing;
 use crate::payments::{PaymentDirection, PaymentStatus};
@@ -393,21 +388,4 @@ fn decode_invoice_inner(invoice: &Invoice) -> anyhow::Result<BridgeInvoice> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    macro_rules! aw {
-        ($e:expr) => {
-            tokio_test::block_on($e)
-        };
-    }
-
-    pub fn setup() -> () {
-        tracing::info!("setting up api tests");
-        init(String::from("/tmp"));
-        assert_eq!(
-            aw!(GLOBAL_CLIENT_MANAGER.get_user_dir()).unwrap(),
-            String::from("/tmp")
-        );
-    }
-}
+mod tests {}

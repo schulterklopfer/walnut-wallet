@@ -3,13 +3,7 @@ use anyhow::{anyhow, Result};
 use bitcoin::hashes::hex::ToHex;
 use bitcoin::hashes::sha256::Hash;
 use fedimint_api::BitcoinHash;
-use fedimint_api::{
-    db::{Database, DatabaseKeyPrefixConst},
-    encoding::{Decodable, Encodable},
-    NumPeers,
-};
 use fedimint_sled::SledDb;
-use lazy_static::lazy_static;
 use mint_client::api::WsFederationConnect;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -255,11 +249,6 @@ impl ClientManager {
             .clone();
         Ok(user_dir)
     }
-
-    pub async fn set_user_dir(&self, user_dir: String) {
-        *self.user_dir.lock().await = Some(user_dir.clone());
-        tracing::info!("set user dir {}", user_dir);
-    }
 }
 
 #[cfg(test)]
@@ -345,7 +334,7 @@ mod tests {
         assert!(std::fs::metadata(&*tmp_dir).is_ok());
         let path = tmp_dir.to_str().unwrap();
         let client_manager = ClientManager::new();
-        client_manager.load(path).await;
+        client_manager.load(path).await?;
 
         let expected_label = "7d2ce1a7dec8";
 
