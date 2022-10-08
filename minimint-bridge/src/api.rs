@@ -13,8 +13,9 @@ use mint_client::utils::network_to_currency;
 use tokio::runtime;
 
 use crate::client::{Client, ConnectionStatus};
+use crate::client_manager::ClientManager;
+use crate::init_tracing;
 use crate::payments::{PaymentDirection, PaymentStatus};
-use crate::{client_manager, init_tracing};
 
 lazy_static! {
     static ref RUNTIME: runtime::Runtime = runtime::Builder::new_multi_thread()
@@ -23,10 +24,14 @@ lazy_static! {
         .expect("failed to build runtime");
 }
 
+lazy_static! {
+    static ref GLOBAL_CLIENT_MANAGER: ClientManager = ClientManager::new();
+}
+
 pub fn init(path: String) {
     init_tracing();
     RUNTIME.block_on(async {
-        client_manager::init(path.clone()).await;
+        GLOBAL_CLIENT_MANAGER.load(&path).await;
     });
 
     // TODO initial loading of dbs:
@@ -62,7 +67,9 @@ pub struct BridgeClientInfo {
 
 pub fn get_client(label: String) -> Result<BridgeClientInfo> {
     RUNTIME.block_on(async {
-        let client_result = client_manager::get_client_by_label(label.as_str()).await;
+        let client_result = GLOBAL_CLIENT_MANAGER
+            .get_client_by_label(label.as_str())
+            .await;
 
         if client_result.is_err() {
             return Err(anyhow!("no such client"));
@@ -82,10 +89,12 @@ pub fn get_clients() -> Result<Vec<BridgeClientInfo>> {
     RUNTIME.block_on(async {
         let mut r = Vec::new();
 
-        let client_labels = client_manager::get_client_labels().await;
+        let client_labels = GLOBAL_CLIENT_MANAGER.get_client_labels().await;
 
         for client_label in client_labels.iter() {
-            let client_result = client_manager::get_client_by_label(client_label.as_str()).await;
+            let client_result = GLOBAL_CLIENT_MANAGER
+                .get_client_by_label(client_label.as_str())
+                .await;
 
             if client_result.is_ok() {
                 let client = client_result.unwrap().clone();
@@ -103,7 +112,9 @@ pub fn get_clients() -> Result<Vec<BridgeClientInfo>> {
 pub fn join_federation(config_url: String) -> Result<BridgeClientInfo> {
     // TODO: throw error when federation was already joined
     RUNTIME.block_on(async {
-        let client = client_manager::add_client(config_url.as_str()).await?;
+        let client = GLOBAL_CLIENT_MANAGER
+            .add_client(config_url.as_str())
+            .await?;
         Ok(BridgeClientInfo {
             label: client.label.clone(),
             balance: client.balance().await,
@@ -115,15 +126,18 @@ pub fn join_federation(config_url: String) -> Result<BridgeClientInfo> {
 /// Unset client and wipe database. Ecash will be destroyed. Use with caution!!!
 pub fn leave_federation(label: String) -> Result<()> {
     RUNTIME.block_on(async {
-        client_manager::remove_client(label.as_str()).await?;
-        client_manager::delete_database(label.as_str()).await?;
+        GLOBAL_CLIENT_MANAGER.remove_client(label.as_str()).await?;
+        GLOBAL_CLIENT_MANAGER
+            .delete_database(label.as_str())
+            .await?;
         Ok(())
     })
 }
 
 pub fn balance(label: String) -> Result<u64> {
     RUNTIME.block_on(async {
-        Ok(client_manager::get_client_by_label(label.as_str())
+        Ok(GLOBAL_CLIENT_MANAGER
+            .get_client_by_label(label.as_str())
             .await?
             .balance()
             .await)
@@ -132,7 +146,8 @@ pub fn balance(label: String) -> Result<u64> {
 
 pub fn pay(label: String, bolt11: String) -> Result<()> {
     RUNTIME.block_on(async {
-        client_manager::get_client_by_label(label.as_str())
+        GLOBAL_CLIENT_MANAGER
+            .get_client_by_label(label.as_str())
             .await?
             .pay(bolt11)
             .await
@@ -141,7 +156,9 @@ pub fn pay(label: String, bolt11: String) -> Result<()> {
 
 pub fn invoice(label: String, amount: u64, description: String) -> Result<String> {
     RUNTIME.block_on(async {
-        let client = client_manager::get_client_by_label(label.as_str()).await?;
+        let client = GLOBAL_CLIENT_MANAGER
+            .get_client_by_label(label.as_str())
+            .await?;
 
         if client.network() == Network::Bitcoin && amount > 60000 {
             return Err(anyhow!("Maximum invoice size on mainnet is 60000 sats"));
@@ -173,7 +190,8 @@ pub struct BridgeInvoice {
 pub fn fetch_payment(label: String, payment_hash: String) -> Result<BridgePayment> {
     let hash: sha256::Hash = payment_hash.parse()?;
     RUNTIME.block_on(async {
-        let payment = client_manager::get_client_by_label(label.as_str())
+        let payment = GLOBAL_CLIENT_MANAGER
+            .get_client_by_label(label.as_str())
             .await?
             .fetch_payment(&hash)
             .ok_or(anyhow!("payment not found"))?;
@@ -190,7 +208,8 @@ pub fn fetch_payment(label: String, payment_hash: String) -> Result<BridgePaymen
 pub fn list_payments(label: String) -> Result<Vec<BridgePayment>> {
     println!("Listing payments...");
     RUNTIME.block_on(async {
-        let payments = client_manager::get_client_by_label(label.as_str())
+        let payments = GLOBAL_CLIENT_MANAGER
+            .get_client_by_label(label.as_str())
             .await?
             .list_payments()
             .iter()
@@ -210,7 +229,7 @@ pub fn list_payments(label: String) -> Result<Vec<BridgePayment>> {
 
 // TODO why does this even have to be a result>
 async fn configured_status_private(label: &str) -> Result<bool> {
-    Ok(client_manager::client_exists(label).await)
+    Ok(GLOBAL_CLIENT_MANAGER.client_exists(label).await)
 }
 
 pub fn configured_status(label: String) -> Result<bool> {
@@ -218,10 +237,11 @@ pub fn configured_status(label: String) -> Result<bool> {
 }
 
 async fn connection_status_private(label: &str) -> Result<ConnectionStatus> {
-    if !client_manager::client_exists(label).await {
+    if !GLOBAL_CLIENT_MANAGER.client_exists(label).await {
         return Ok(ConnectionStatus::NotConfigured);
     }
-    match client_manager::get_client_by_label(label)
+    match GLOBAL_CLIENT_MANAGER
+        .get_client_by_label(label)
         .await?
         .check_connection()
         .await
@@ -237,7 +257,8 @@ pub fn connection_status(label: String) -> Result<ConnectionStatus> {
 
 pub fn network(label: String) -> Result<String> {
     RUNTIME.block_on(async {
-        Ok(client_manager::get_client_by_label(label.as_str())
+        Ok(GLOBAL_CLIENT_MANAGER
+            .get_client_by_label(label.as_str())
             .await?
             .network()
             .to_string())
@@ -326,7 +347,9 @@ pub fn switch_federation(_federation: BridgeFederationInfo) -> Result<()> {
 /// Decodes an invoice and checks that we can pay it
 pub fn decode_invoice(label: String, bolt11: String) -> Result<BridgeInvoice> {
     RUNTIME.block_on(async {
-        let client = client_manager::get_client_by_label(label.as_str()).await?;
+        let client = GLOBAL_CLIENT_MANAGER
+            .get_client_by_label(label.as_str())
+            .await?;
         let invoice: Invoice = match bolt11.parse() {
             Ok(i) => Ok(i),
             Err(_) => Err(anyhow!("Invalid lightning invoice")),
@@ -383,7 +406,7 @@ mod tests {
         tracing::info!("setting up api tests");
         init(String::from("/tmp"));
         assert_eq!(
-            aw!(client_manager::get_user_dir()).unwrap(),
+            aw!(GLOBAL_CLIENT_MANAGER.get_user_dir()).unwrap(),
             String::from("/tmp")
         );
     }
