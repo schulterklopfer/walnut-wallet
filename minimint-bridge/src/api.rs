@@ -123,7 +123,7 @@ pub fn leave_federation(label: String) -> Result<()> {
     RUNTIME.block_on(async {
         GLOBAL_CLIENT_MANAGER.remove_client(label.as_str()).await?;
         GLOBAL_CLIENT_MANAGER
-            .delete_database(label.as_str())
+            .delete_client_database(label.as_str())
             .await?;
         Ok(())
     })

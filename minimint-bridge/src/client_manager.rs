@@ -1,5 +1,5 @@
 use crate::client::Client;
-use crate::database::{SledDatabase, SledTree};
+use crate::database::SledDatabase;
 use anyhow::{anyhow, Result};
 use bitcoin::hashes::hex::ToHex;
 use bitcoin::hashes::sha256::Hash;
@@ -37,7 +37,9 @@ impl ClientManager {
 
     pub async fn load(&self, path: &str) -> Result<()> {
         *self.user_dir.lock().await = Some(String::from(path));
-        *self.db.lock().await = Some(SledDatabase::open(path)?);
+        *self.db.lock().await = Some(SledDatabase::open(
+            Path::new(path).join(CLIENT_DB_FILENAME),
+        )?);
         self.load_clients().await?;
         Ok(())
     }
@@ -143,39 +145,40 @@ impl ClientManager {
         if self.clients.lock().await.contains_key(label) {
             return Err(anyhow!("Can't add client twice"));
         }
-        let user_dir = self.get_user_dir().await?;
-        tracing::info!("add_client: user dir {}", user_dir);
-        let filename = Path::new(&user_dir).join(CLIENT_DB_FILENAME);
         // TODO: use federation name as "tree"
-        let db = SledTree::open(filename, label)?;
-        // FIXME: just doing this twice so that I can report a better error
-        if let Err(_) = serde_json::from_str::<WsFederationConnect>(&config_url) {
-            return Err(anyhow!("Invalid federation QR / code"));
-        }
-        let client = Client::new(db.into(), &config_url, label).await?;
-        client.client.fetch_all_coins().await;
+        if let Some(db_container) = &*self.db.lock().await {
+            // FIXME: just doing this twice so that I can report a better error
+            if let Err(_) = serde_json::from_str::<WsFederationConnect>(&config_url) {
+                return Err(anyhow!("Invalid federation QR / code"));
+            }
+            let db = db_container.open_tree(label)?;
+            let client = Client::new(db.into(), &config_url, label).await?;
+            client.client.fetch_all_coins().await;
 
-        let client_arc = Arc::new(client);
-        // for good measure, make sure the balance is updated (FIXME)
-        self.clients
-            .lock()
-            .await
-            .insert(String::from(label), Mutex::new(client_arc.clone()));
-        tracing::info!("Client added {}", label);
-        if self.poller.lock().await.is_none() {
-            tracing::info!("polling started");
+            let client_arc = Arc::new(client);
+            // for good measure, make sure the balance is updated (FIXME)
+            self.clients
+                .lock()
+                .await
+                .insert(String::from(label), Mutex::new(client_arc.clone()));
+            tracing::info!("Client added {}", label);
+            if self.poller.lock().await.is_none() {
+                tracing::info!("polling started");
 
-            *self.poller.lock().await = Some(tokio::spawn({
-                let clients = self.clients.clone();
-                async move {
-                    for (_key, value) in &*clients.lock().await {
-                        tracing::info!("polling {}", value.lock().await.label);
-                        value.lock().await.poll().await;
+                *self.poller.lock().await = Some(tokio::spawn({
+                    let clients = self.clients.clone();
+                    async move {
+                        for (_key, value) in &*clients.lock().await {
+                            tracing::info!("polling {}", value.lock().await.label);
+                            value.lock().await.poll().await;
+                        }
                     }
-                }
-            }));
+                }));
+            }
+            Ok(client_arc.clone())
+        } else {
+            Err(anyhow!("no database to use."))
         }
-        Ok(client_arc.clone())
     }
 
     pub async fn remove_client(&self, label: &str) -> Result<()> {
@@ -201,12 +204,20 @@ impl ClientManager {
         Ok(())
     }
 
-    pub async fn delete_database(&self, label: &str) -> Result<()> {
-        // Wipe database
-        // TODO: drop tree for label
+    pub async fn delete_client_database(&self, label: &str) -> Result<bool> {
+        // Wipe database for client
+        // all tokens of client are
+        if let Some(db) = &*self.db.lock().await {
+            db.drop_tree(label)?;
+        }
+        Ok(false) // no tree was deleted, but no error? How?
+    }
+
+    pub async fn delete_database(&self) -> Result<()> {
+        // Wipe database COMPLETELY!!
+        // EVERYTHING IS GONE!!
         if let Some(user_dir) = self.user_dir.lock().await.as_ref() {
-            let db_dir = Path::new(&user_dir).join(label);
-            std::fs::remove_dir_all(db_dir)?;
+            std::fs::remove_dir_all(Path::new(&user_dir).join(CLIENT_DB_FILENAME))?;
         }
         Ok(())
     }
@@ -226,9 +237,11 @@ impl ClientManager {
 #[cfg(test)]
 mod tests {
 
+    use fedimint_api::db::{Database, IDatabase};
     use fs_extra::dir::{copy, CopyOptions};
 
     use super::*;
+    use crate::client::ConfigKey;
     use crate::init_tracing;
     use crate::tests::TestResult;
 
@@ -262,18 +275,28 @@ mod tests {
         assert!(std::fs::metadata(&*tmp_dir).is_ok());
         let path = tmp_dir.to_str().unwrap();
         let client_manager = ClientManager::new();
+        let expected_label = "7d2ce1a7dec8";
 
-        let options = CopyOptions::new(); //Initialize default values for CopyOptions
-                                          //options.mirror_copy = true; // To mirror copy the whole structure of the source directory
-
-        copy(
-            "/Users/jash/src/walnut/minimint-bridge/src/test_data/client_manager/db/client.db",
-            path,
-            &options,
-        )?;
+        // create dummy entry in client tree so it can be restored in
+        // client_manager.load(path)
+        {
+            if let Ok(db) = SledDatabase::open(Path::new(path).join(CLIENT_DB_FILENAME)) {
+                if let Ok(tree) = db.open_tree(expected_label) {
+                    let data: Database = tree.into();
+                    data.insert_entry(
+                        &ConfigKey,
+                        &String::from("{\"members\":[[0,\"wss://fm-signet.sirion.io:443\"]]}"),
+                    )?;
+                }
+            }
+        }
 
         let r = client_manager.load(path).await;
         assert!(r.is_ok());
+
+        let client_labels = client_manager.get_client_labels().await;
+        assert!(client_labels.contains(&String::from(expected_label)));
+
         Ok(())
     }
 
@@ -304,6 +327,7 @@ mod tests {
         assert_eq!(client.unwrap().label.clone(), expected_label);
 
         let client_labels = client_manager.get_client_labels().await;
+        assert!(client_labels.contains(&String::from(expected_label)));
 
         client_manager.remove_client(expected_label).await?;
 
