@@ -275,17 +275,25 @@ mod tests {
         assert!(std::fs::metadata(&*tmp_dir).is_ok());
         let path = tmp_dir.to_str().unwrap();
         let client_manager = ClientManager::new();
-        let expected_label = "7d2ce1a7dec8";
+        let client_label1 = "7d2ce1a7dec8";
+        let client_label2 = "0cde707b67f2";
 
         // create dummy entry in client tree so it can be restored in
         // client_manager.load(path)
         {
             if let Ok(db) = SledDatabase::open(Path::new(path).join(CLIENT_DB_FILENAME)) {
-                if let Ok(tree) = db.open_tree(expected_label) {
+                if let Ok(tree) = db.open_tree(client_label1) {
                     let data: Database = tree.into();
                     data.insert_entry(
                         &ConfigKey,
                         &String::from("{\"members\":[[0,\"wss://fm-signet.sirion.io:443\"]]}"),
+                    )?;
+                }
+                if let Ok(tree) = db.open_tree(client_label2) {
+                    let data: Database = tree.into();
+                    data.insert_entry(
+                        &ConfigKey,
+                        &String::from("{\"members\":[[0,\"ws://188.166.55.8:5000\"]]}"),
                     )?;
                 }
             }
@@ -295,7 +303,8 @@ mod tests {
         assert!(r.is_ok());
 
         let client_labels = client_manager.get_client_labels().await;
-        assert!(client_labels.contains(&String::from(expected_label)));
+        assert!(client_labels.contains(&String::from(client_label1)));
+        assert!(client_labels.contains(&String::from(client_label2)));
 
         Ok(())
     }
