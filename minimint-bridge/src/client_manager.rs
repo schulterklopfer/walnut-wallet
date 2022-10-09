@@ -1,4 +1,4 @@
-use crate::client::Client;
+use crate::client::{Client, UserDataKey};
 use crate::database::SledDatabase;
 use anyhow::{anyhow, Result};
 use bitcoin::hashes::hex::ToHex;
@@ -204,6 +204,23 @@ impl ClientManager {
         Ok(())
     }
 
+    pub async fn save_user_data_for_client(&self, label: &str, user_data: &str) -> Result<()> {
+        match self.get_client_by_label(label).await {
+            Ok(client) => {
+                client.save_user_data(user_data);
+                return Ok(());
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    pub async fn fetch_user_data_for_client(&self, label: &str) -> String {
+        match self.get_client_by_label(label).await {
+            Ok(client) => client.fetch_user_data(),
+            Err(_) => String::from(""),
+        }
+    }
+
     pub async fn delete_client_database(&self, label: &str) -> Result<bool> {
         // Wipe database for client
         // all tokens of client are
@@ -319,6 +336,7 @@ mod tests {
         client_manager.load(path).await?;
 
         let expected_label = "7d2ce1a7dec8";
+        let user_data: &str = "{\"foo\":\"bar\"}";
 
         let r = client_manager
             .add_client("{\"members\":[[0,\"wss://fm-signet.sirion.io:443\"]]}")
@@ -336,6 +354,18 @@ mod tests {
 
         let client_labels = client_manager.get_client_labels().await;
         assert!(client_labels.contains(&String::from(expected_label)));
+
+        let r = client_manager
+            .save_user_data_for_client(expected_label, user_data)
+            .await;
+
+        assert!(r.is_ok());
+
+        let v = client_manager
+            .fetch_user_data_for_client(expected_label)
+            .await;
+
+        assert_eq!(v, user_data);
 
         client_manager.remove_client(expected_label).await?;
 

@@ -1,6 +1,6 @@
 //! Minimint client with simpler types
 use anyhow::anyhow;
-use bitcoin::hashes::sha256;
+use bitcoin::{hashes::sha256, psbt::Error};
 use fedimint_api::{
     db::{Database, DatabaseKeyPrefixConst},
     encoding::{Decodable, Encodable},
@@ -66,14 +66,41 @@ impl Client {
         }
         // TODO: what to do if this payment doesn't exist?
     }
+
+    pub fn save_user_data(&self, user_data: &str) {
+        self.client
+            .db()
+            .insert_entry(&UserDataKey, &user_data.to_string())
+            .expect("Db error");
+    }
+
+    pub fn fetch_user_data(&self) -> String {
+        match self.client.db().get_value(&UserDataKey) {
+            Ok(v) => match v {
+                Some(user_data) => user_data,
+                None => return String::from(""),
+            },
+            Err(_) => return String::from(""),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct ConfigKey;
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct UserDataKey;
 const CONFIG_KEY_PREFIX: u8 = 0x50;
+const USER_DATA_KEY_PREFIX: u8 = 0x60;
 
 impl DatabaseKeyPrefixConst for ConfigKey {
     const DB_PREFIX: u8 = CONFIG_KEY_PREFIX;
+    type Key = Self;
+
+    type Value = String;
+}
+
+impl DatabaseKeyPrefixConst for UserDataKey {
+    const DB_PREFIX: u8 = USER_DATA_KEY_PREFIX;
     type Key = Self;
 
     type Value = String;
@@ -110,11 +137,11 @@ impl Client {
         })
     }
 
-    pub async fn federation_name(&self) -> String {
+    pub fn federation_name(&self) -> String {
         self.client.config().0.federation_name
     }
 
-    pub async fn balance(&self) -> u64 {
+    pub fn balance(&self) -> u64 {
         (self.client.coins().total_amount().milli_sat as f64 / 1000.) as u64
     }
 

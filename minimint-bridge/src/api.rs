@@ -55,9 +55,10 @@ pub fn init(path: String) {
 /// Bridge representation of a fedimint node
 #[derive(Clone, Debug)]
 pub struct BridgeClientInfo {
-    pub label: String,
-    pub balance: u64,
+    pub label: String, // unique label of the client
+    pub balance: u64,  // balance in satoshis
     pub federation_name: String,
+    pub user_data: String, // data which can be set, but is only useful to the user
 }
 
 pub fn get_client(label: String) -> Result<BridgeClientInfo> {
@@ -74,8 +75,9 @@ pub fn get_client(label: String) -> Result<BridgeClientInfo> {
 
         Ok(BridgeClientInfo {
             label: label.clone(),
-            balance: client.balance().await,
-            federation_name: client.federation_name().await,
+            balance: client.balance(),
+            federation_name: client.federation_name(),
+            user_data: client.fetch_user_data(),
         })
     })
 }
@@ -95,8 +97,9 @@ pub fn get_clients() -> Result<Vec<BridgeClientInfo>> {
                 let client = client_result.unwrap().clone();
                 r.push(BridgeClientInfo {
                     label: client_label.clone(),
-                    balance: client.balance().await,
-                    federation_name: client.federation_name().await,
+                    balance: client.balance(),
+                    federation_name: client.federation_name(),
+                    user_data: client.fetch_user_data(),
                 })
             }
         }
@@ -112,8 +115,9 @@ pub fn join_federation(config_url: String) -> Result<BridgeClientInfo> {
             .await?;
         Ok(BridgeClientInfo {
             label: client.label.clone(),
-            balance: client.balance().await,
-            federation_name: client.federation_name().await,
+            balance: client.balance(),
+            federation_name: client.federation_name(),
+            user_data: client.fetch_user_data(),
         })
     })
 }
@@ -134,8 +138,7 @@ pub fn balance(label: String) -> Result<u64> {
         Ok(GLOBAL_CLIENT_MANAGER
             .get_client_by_label(label.as_str())
             .await?
-            .balance()
-            .await)
+            .balance())
     })
 }
 
