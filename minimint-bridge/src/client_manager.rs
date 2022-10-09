@@ -237,8 +237,7 @@ impl ClientManager {
 #[cfg(test)]
 mod tests {
 
-    use fedimint_api::db::{Database, IDatabase};
-    use fs_extra::dir::{copy, CopyOptions};
+    use fedimint_api::db::Database;
 
     use super::*;
     use crate::client::ConfigKey;
