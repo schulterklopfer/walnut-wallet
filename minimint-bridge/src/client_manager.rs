@@ -1,30 +1,25 @@
 use crate::client::Client;
+use crate::database::{SledDatabase, SledTree};
 use anyhow::{anyhow, Result};
 use bitcoin::hashes::hex::ToHex;
 use bitcoin::hashes::sha256::Hash;
 use fedimint_api::BitcoinHash;
-use fedimint_sled::SledDb;
 use mint_client::api::WsFederationConnect;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 extern crate lazy_static;
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ClientManagerState {
-    pub active_clients: Vec<String>,
-}
+static CLIENT_DB_FILENAME: &str = "client.db";
+static DEFAULT_TREE_ID: &str = "__sled__default";
 
 pub struct ClientManager {
     clients: Arc<Mutex<HashMap<String, Mutex<Arc<Client>>>>>,
     poller: Mutex<Option<JoinHandle<()>>>,
     user_dir: Mutex<Option<String>>,
+    db: Mutex<Option<SledDatabase>>,
 }
 
 // Justin: static function to return a reference to the federation you're working on.
@@ -36,24 +31,28 @@ impl ClientManager {
             clients: Arc::new(Mutex::new(HashMap::new())),
             poller: Mutex::new(None),
             user_dir: Mutex::new(None),
+            db: Mutex::new(None),
         }
     }
 
     pub async fn load(&self, path: &str) -> Result<()> {
         *self.user_dir.lock().await = Some(String::from(path));
+        *self.db.lock().await = Some(SledDatabase::open(path)?);
         self.load_clients().await?;
         Ok(())
     }
 
     async fn load_clients(&self) -> Result<()> {
-        let client_manager_state_result = self.load_client_manager_state().await;
-        let path = self.get_user_dir().await?;
-        if client_manager_state_result.is_ok() {
-            for client_label in client_manager_state_result.unwrap().active_clients.iter() {
-                let client_db_filename = Path::new(&path).join(client_label);
-                let db = SledDb::open(client_db_filename, "client")?;
+        let client_labels = self.get_client_labels_from_db().await;
+        let db_option = self.db.lock().await;
+        if let Some(db) = db_option.as_ref() {
+            for client_label in client_labels.iter() {
+                //let client_db_filename = Path::new(&path).join(client_label);
 
-                if let Some(client) = Client::try_load(db.into(), client_label.as_str()).await? {
+                if let Some(client) =
+                    Client::try_load(db.open_tree(client_label)?.into(), client_label.as_str())
+                        .await?
+                {
                     let client = Arc::new(client);
 
                     self.clients.lock().await.insert(
@@ -65,6 +64,7 @@ impl ClientManager {
                     tracing::info!("no database for client {}", client_label);
                 }
             }
+
             if self.poller.lock().await.is_none() {
                 tracing::info!("polling started");
                 *self.poller.lock().await = Some(tokio::spawn({
@@ -81,57 +81,30 @@ impl ClientManager {
         Ok(())
     }
 
-    async fn client_manager_state_from_clients(&self) -> Result<ClientManagerState> {
-        Ok(ClientManagerState {
-            active_clients: self.get_client_labels().await,
-        })
-    }
-
-    fn load_client_manager_state_from(&self, path_buf: PathBuf) -> Result<ClientManagerState> {
-        let file = File::open(path_buf)?;
-        let reader = BufReader::new(file);
-        let client_manager_state = serde_json::from_reader(reader)?;
-        Ok(client_manager_state)
-    }
-
-    async fn load_client_manager_state(&self) -> Result<ClientManagerState> {
-        let user_dir = self.get_user_dir().await?;
-        tracing::info!("add_client: user dir {}", user_dir);
-        let path_buf = Path::new(&user_dir).join("client_manager_state.json");
-        Ok(self.load_client_manager_state_from(path_buf)?)
-    }
-
-    fn save_client_manager_state_to(
-        &self,
-        client_manager_state: ClientManagerState,
-        path_buf: PathBuf,
-    ) -> Result<()> {
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(path_buf)?;
-        serde_json::to_writer(&file, &client_manager_state)?;
-        Ok(())
-    }
-
-    async fn save_client_manager_state(
-        &self,
-        client_manager_state: ClientManagerState,
-    ) -> Result<()> {
-        let user_dir = self.get_user_dir().await?;
-        tracing::info!("add_client: user dir {}", user_dir);
-        let path_buf = Path::new(&user_dir).join("client_manager_state.json");
-        self.save_client_manager_state_to(client_manager_state, path_buf)?;
-        Ok(())
-    }
-
     pub async fn get_client_count(&self) -> usize {
         self.clients.lock().await.len()
     }
 
     pub async fn get_client_labels(&self) -> Vec<String> {
         self.clients.lock().await.keys().cloned().collect()
+    }
+
+    pub async fn get_client_labels_from_db(&self) -> Vec<String> {
+        let db_option = self.db.lock().await;
+        if let Some(db) = db_option.as_ref() {
+            // every tree name except the default sled tree name is a client label
+            match db.tree_names() {
+                Ok(tree_names) => tree_names
+                    .iter()
+                    // not sure if this is nice... TODO: revisit
+                    .filter(|name| *name != DEFAULT_TREE_ID)
+                    .map(|name_ref| name_ref.clone())
+                    .collect(),
+                Err(_) => vec![],
+            }
+        } else {
+            vec![]
+        }
     }
 
     pub async fn client_exists(&self, label: &str) -> bool {
@@ -172,9 +145,9 @@ impl ClientManager {
         }
         let user_dir = self.get_user_dir().await?;
         tracing::info!("add_client: user dir {}", user_dir);
-        let filename = Path::new(&user_dir).join(label);
+        let filename = Path::new(&user_dir).join(CLIENT_DB_FILENAME);
         // TODO: use federation name as "tree"
-        let db = SledDb::open(filename, label)?;
+        let db = SledTree::open(filename, label)?;
         // FIXME: just doing this twice so that I can report a better error
         if let Err(_) = serde_json::from_str::<WsFederationConnect>(&config_url) {
             return Err(anyhow!("Invalid federation QR / code"));
@@ -189,8 +162,6 @@ impl ClientManager {
             .await
             .insert(String::from(label), Mutex::new(client_arc.clone()));
         tracing::info!("Client added {}", label);
-        self.save_client_manager_state(self.client_manager_state_from_clients().await?)
-            .await?;
         if self.poller.lock().await.is_none() {
             tracing::info!("polling started");
 
@@ -232,6 +203,7 @@ impl ClientManager {
 
     pub async fn delete_database(&self, label: &str) -> Result<()> {
         // Wipe database
+        // TODO: drop tree for label
         if let Some(user_dir) = self.user_dir.lock().await.as_ref() {
             let db_dir = Path::new(&user_dir).join(label);
             std::fs::remove_dir_all(db_dir)?;
@@ -254,13 +226,13 @@ impl ClientManager {
 #[cfg(test)]
 mod tests {
 
+    use fs_extra::dir::{copy, CopyOptions};
+
     use super::*;
     use crate::init_tracing;
+    use crate::tests::TestResult;
 
-    use std::io::Read;
     use std::sync::Once;
-
-    type TestResult<T = (), E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
     static INIT: Once = Once::new();
 
@@ -268,50 +240,6 @@ mod tests {
         INIT.call_once(|| {
             init_tracing();
         });
-    }
-
-    #[tokio::test]
-    async fn test_client_manager_state_serde() -> TestResult {
-        // When tmp_dir is dropped this temporary dir will be removed
-        setup();
-        let tmp_dir = tmp_env::create_temp_dir().expect("cannot create temp dir");
-        assert!(std::fs::metadata(&*tmp_dir).is_ok());
-        let path = tmp_dir.to_str().unwrap();
-
-        let client_manager_state_json_file = "client_manager_state_tmp.json";
-
-        let expected_state_json = "{\"activeClients\":[\"foo\",\"bar\",\"fish\"]}";
-        let client_manager_state = ClientManagerState {
-            active_clients: vec!["foo".to_string(), "bar".to_string(), "fish".to_string()],
-        };
-
-        // load unsucessful
-        let client_manager = ClientManager::new();
-        let new_client_manager_state = client_manager
-            .load_client_manager_state_from(Path::new(path).join(client_manager_state_json_file));
-        assert!(new_client_manager_state.is_err());
-        // save
-        client_manager.save_client_manager_state_to(
-            client_manager_state,
-            Path::new(path).join(client_manager_state_json_file),
-        )?;
-
-        let mut file = File::open(Path::new(path).join(client_manager_state_json_file))?;
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        assert_eq!(contents, expected_state_json);
-
-        // load
-
-        let new_client_manager_state = client_manager
-            .load_client_manager_state_from(Path::new(path).join(client_manager_state_json_file))?;
-
-        assert_eq!(
-            new_client_manager_state.active_clients,
-            vec!["foo".to_string(), "bar".to_string(), "fish".to_string()]
-        );
-
-        Ok(())
     }
 
     #[tokio::test]
@@ -328,8 +256,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_init_with_data() -> TestResult {
+        setup();
+        let tmp_dir = tmp_env::create_temp_dir().expect("cannot create temp dir");
+        assert!(std::fs::metadata(&*tmp_dir).is_ok());
+        let path = tmp_dir.to_str().unwrap();
+        let client_manager = ClientManager::new();
+
+        let options = CopyOptions::new(); //Initialize default values for CopyOptions
+                                          //options.mirror_copy = true; // To mirror copy the whole structure of the source directory
+
+        copy(
+            "/Users/jash/src/walnut/minimint-bridge/src/test_data/client_manager/db/client.db",
+            path,
+            &options,
+        )?;
+
+        let r = client_manager.load(path).await;
+        assert!(r.is_ok());
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_clients() -> TestResult {
         setup();
+
         let tmp_dir = tmp_env::create_temp_dir().expect("cannot create temp dir");
         assert!(std::fs::metadata(&*tmp_dir).is_ok());
         let path = tmp_dir.to_str().unwrap();
@@ -351,6 +302,8 @@ mod tests {
         let client = client_manager.get_client_by_label(expected_label).await;
         assert!(client.is_ok());
         assert_eq!(client.unwrap().label.clone(), expected_label);
+
+        let client_labels = client_manager.get_client_labels().await;
 
         client_manager.remove_client(expected_label).await?;
 
