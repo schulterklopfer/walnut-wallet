@@ -1,4 +1,4 @@
-use crate::client::{Client, UserDataKey};
+use crate::client::Client;
 use crate::database::SledDatabase;
 use anyhow::{anyhow, Result};
 use bitcoin::hashes::hex::ToHex;
@@ -6,80 +6,71 @@ use bitcoin::hashes::sha256::Hash;
 use fedimint_api::BitcoinHash;
 use mint_client::api::WsFederationConnect;
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 extern crate lazy_static;
 
-static CLIENT_DB_FILENAME: &str = "client.db";
 static DEFAULT_TREE_ID: &str = "__sled__default";
 
 pub struct ClientManager {
     clients: Arc<Mutex<HashMap<String, Mutex<Arc<Client>>>>>,
     poller: Mutex<Option<JoinHandle<()>>>,
-    user_dir: Mutex<Option<String>>,
-    db: Mutex<Option<SledDatabase>>,
+    db: Arc<Mutex<SledDatabase>>,
 }
 
 // Justin: static function to return a reference to the federation you're working on.
 // Dart side can call methods on it.
 
 impl ClientManager {
-    pub fn new() -> ClientManager {
+    pub fn new(db: Arc<Mutex<SledDatabase>>) -> ClientManager {
         ClientManager {
             clients: Arc::new(Mutex::new(HashMap::new())),
             poller: Mutex::new(None),
-            user_dir: Mutex::new(None),
-            db: Mutex::new(None),
+            db: db,
         }
     }
 
-    pub async fn load(&self, path: &str) -> Result<()> {
-        *self.user_dir.lock().await = Some(String::from(path));
-        *self.db.lock().await = Some(SledDatabase::open(
-            Path::new(path).join(CLIENT_DB_FILENAME),
-        )?);
+    pub async fn load(&self) -> Result<()> {
         self.load_clients().await?;
         Ok(())
     }
 
     async fn load_clients(&self) -> Result<()> {
         let client_labels = self.get_client_labels_from_db().await;
-        let db_option = self.db.lock().await;
-        if let Some(db) = db_option.as_ref() {
-            for client_label in client_labels.iter() {
-                //let client_db_filename = Path::new(&path).join(client_label);
+        for client_label in client_labels.iter() {
+            //let client_db_filename = Path::new(&path).join(client_label);
+            if let Some(client) = Client::try_load(
+                self.db.lock().await.open_tree(client_label)?.into(),
+                client_label.as_str(),
+            )
+            .await?
+            {
+                let client = Arc::new(client);
 
-                if let Some(client) =
-                    Client::try_load(db.open_tree(client_label)?.into(), client_label.as_str())
-                        .await?
-                {
-                    let client = Arc::new(client);
-
-                    self.clients.lock().await.insert(
-                        String::from(client_label.as_str()),
-                        Mutex::new(client.clone()),
-                    );
-                    tracing::info!("loading client {}", client_label);
-                } else {
-                    tracing::info!("no database for client {}", client_label);
-                }
-            }
-
-            if self.poller.lock().await.is_none() {
-                tracing::info!("polling started");
-                *self.poller.lock().await = Some(tokio::spawn({
-                    let clients = self.clients.clone();
-                    async move {
-                        for (_key, value) in &*clients.lock().await {
-                            tracing::info!("polling {}", value.lock().await.label);
-                            value.lock().await.poll().await;
-                        }
-                    }
-                }));
+                self.clients.lock().await.insert(
+                    String::from(client_label.as_str()),
+                    Mutex::new(client.clone()),
+                );
+                tracing::info!("loading client {}", client_label);
+            } else {
+                tracing::info!("no database for client {}", client_label);
             }
         }
+
+        if self.poller.lock().await.is_none() {
+            tracing::info!("polling started");
+            *self.poller.lock().await = Some(tokio::spawn({
+                let clients = self.clients.clone();
+                async move {
+                    for (_key, value) in &*clients.lock().await {
+                        tracing::info!("polling {}", value.lock().await.label);
+                        value.lock().await.poll().await;
+                    }
+                }
+            }));
+        }
+
         Ok(())
     }
 
@@ -92,20 +83,15 @@ impl ClientManager {
     }
 
     pub async fn get_client_labels_from_db(&self) -> Vec<String> {
-        let db_option = self.db.lock().await;
-        if let Some(db) = db_option.as_ref() {
-            // every tree name except the default sled tree name is a client label
-            match db.tree_names() {
-                Ok(tree_names) => tree_names
-                    .iter()
-                    // not sure if this is nice... TODO: revisit
-                    .filter(|name| *name != DEFAULT_TREE_ID)
-                    .map(|name_ref| name_ref.clone())
-                    .collect(),
-                Err(_) => vec![],
-            }
-        } else {
-            vec![]
+        // every tree name except the default sled tree name is a client label
+        match self.db.lock().await.tree_names() {
+            Ok(tree_names) => tree_names
+                .iter()
+                // not sure if this is nice... TODO: revisit
+                .filter(|name| *name != DEFAULT_TREE_ID)
+                .map(|name_ref| name_ref.clone())
+                .collect(),
+            Err(_) => vec![],
         }
     }
 
@@ -145,40 +131,35 @@ impl ClientManager {
         if self.clients.lock().await.contains_key(label) {
             return Err(anyhow!("Can't add client twice"));
         }
-        // TODO: use federation name as "tree"
-        if let Some(db_container) = &*self.db.lock().await {
-            // FIXME: just doing this twice so that I can report a better error
-            if let Err(_) = serde_json::from_str::<WsFederationConnect>(&config_url) {
-                return Err(anyhow!("Invalid federation QR / code"));
-            }
-            let db = db_container.open_tree(label)?;
-            let client = Client::new(db.into(), &config_url, label).await?;
-            client.client.fetch_all_coins().await;
-
-            let client_arc = Arc::new(client);
-            // for good measure, make sure the balance is updated (FIXME)
-            self.clients
-                .lock()
-                .await
-                .insert(String::from(label), Mutex::new(client_arc.clone()));
-            tracing::info!("Client added {}", label);
-            if self.poller.lock().await.is_none() {
-                tracing::info!("polling started");
-
-                *self.poller.lock().await = Some(tokio::spawn({
-                    let clients = self.clients.clone();
-                    async move {
-                        for (_key, value) in &*clients.lock().await {
-                            tracing::info!("polling {}", value.lock().await.label);
-                            value.lock().await.poll().await;
-                        }
-                    }
-                }));
-            }
-            Ok(client_arc.clone())
-        } else {
-            Err(anyhow!("no database to use."))
+        // FIXME: just doing this twice so that I can report a better error
+        if let Err(_) = serde_json::from_str::<WsFederationConnect>(&config_url) {
+            return Err(anyhow!("Invalid federation QR / code"));
         }
+        let db = self.db.lock().await.open_tree(label)?;
+        let client = Client::new(db.into(), &config_url, label).await?;
+        client.client.fetch_all_coins().await;
+
+        let client_arc = Arc::new(client);
+        // for good measure, make sure the balance is updated (FIXME)
+        self.clients
+            .lock()
+            .await
+            .insert(String::from(label), Mutex::new(client_arc.clone()));
+        tracing::info!("Client added {}", label);
+        if self.poller.lock().await.is_none() {
+            tracing::info!("polling started");
+
+            *self.poller.lock().await = Some(tokio::spawn({
+                let clients = self.clients.clone();
+                async move {
+                    for (_key, value) in &*clients.lock().await {
+                        tracing::info!("polling {}", value.lock().await.label);
+                        value.lock().await.poll().await;
+                    }
+                }
+            }));
+        }
+        Ok(client_arc.clone())
     }
 
     pub async fn remove_client(&self, label: &str) -> Result<()> {
@@ -224,30 +205,8 @@ impl ClientManager {
     pub async fn delete_client_database(&self, label: &str) -> Result<bool> {
         // Wipe database for client
         // all tokens of client are
-        if let Some(db) = &*self.db.lock().await {
-            db.drop_tree(label)?;
-        }
+        self.db.lock().await.drop_tree(label)?;
         Ok(false) // no tree was deleted, but no error? How?
-    }
-
-    pub async fn delete_database(&self) -> Result<()> {
-        // Wipe database COMPLETELY!!
-        // EVERYTHING IS GONE!!
-        if let Some(user_dir) = self.user_dir.lock().await.as_ref() {
-            std::fs::remove_dir_all(Path::new(&user_dir).join(CLIENT_DB_FILENAME))?;
-        }
-        Ok(())
-    }
-
-    pub async fn get_user_dir(&self) -> Result<String> {
-        let user_dir = self
-            .user_dir
-            .lock()
-            .await
-            .as_ref()
-            .ok_or(anyhow!("not initialized"))?
-            .clone();
-        Ok(user_dir)
     }
 }
 
@@ -261,9 +220,11 @@ mod tests {
     use crate::init_tracing;
     use crate::tests::TestResult;
 
+    use std::path::Path;
     use std::sync::Once;
 
     static INIT: Once = Once::new();
+    static CLIENT_DB_FILENAME: &str = "client.db";
 
     fn setup() {
         INIT.call_once(|| {
@@ -277,9 +238,9 @@ mod tests {
         let tmp_dir = tmp_env::create_temp_dir().expect("cannot create temp dir");
         assert!(std::fs::metadata(&*tmp_dir).is_ok());
         let path = tmp_dir.to_str().unwrap();
-        let client_manager = ClientManager::new();
-
-        let r = client_manager.load(path).await;
+        let db = SledDatabase::open(Path::new(&path).join(CLIENT_DB_FILENAME))?;
+        let client_manager = ClientManager::new(Arc::new(Mutex::new(db)));
+        let r = client_manager.load().await;
         assert!(r.is_ok());
         Ok(())
     }
@@ -290,32 +251,31 @@ mod tests {
         let tmp_dir = tmp_env::create_temp_dir().expect("cannot create temp dir");
         assert!(std::fs::metadata(&*tmp_dir).is_ok());
         let path = tmp_dir.to_str().unwrap();
-        let client_manager = ClientManager::new();
+        let db = SledDatabase::open(Path::new(path).join(CLIENT_DB_FILENAME))?;
+
         let client_label1 = "7d2ce1a7dec8";
         let client_label2 = "0cde707b67f2";
 
         // create dummy entry in client tree so it can be restored in
         // client_manager.load(path)
-        {
-            if let Ok(db) = SledDatabase::open(Path::new(path).join(CLIENT_DB_FILENAME)) {
-                if let Ok(tree) = db.open_tree(client_label1) {
-                    let data: Database = tree.into();
-                    data.insert_entry(
-                        &ConfigKey,
-                        &String::from("{\"members\":[[0,\"wss://fm-signet.sirion.io:443\"]]}"),
-                    )?;
-                }
-                if let Ok(tree) = db.open_tree(client_label2) {
-                    let data: Database = tree.into();
-                    data.insert_entry(
-                        &ConfigKey,
-                        &String::from("{\"members\":[[0,\"ws://188.166.55.8:5000\"]]}"),
-                    )?;
-                }
-            }
-        }
 
-        let r = client_manager.load(path).await;
+        if let Ok(tree) = db.open_tree(client_label1) {
+            let data: Database = tree.into();
+            data.insert_entry(
+                &ConfigKey,
+                &String::from("{\"members\":[[0,\"wss://fm-signet.sirion.io:443\"]]}"),
+            )?;
+        }
+        if let Ok(tree) = db.open_tree(client_label2) {
+            let data: Database = tree.into();
+            data.insert_entry(
+                &ConfigKey,
+                &String::from("{\"members\":[[0,\"ws://188.166.55.8:5000\"]]}"),
+            )?;
+        }
+        let client_manager = ClientManager::new(Arc::new(Mutex::new(db)));
+        let r = client_manager.load().await;
+
         assert!(r.is_ok());
 
         let client_labels = client_manager.get_client_labels().await;
@@ -332,8 +292,9 @@ mod tests {
         let tmp_dir = tmp_env::create_temp_dir().expect("cannot create temp dir");
         assert!(std::fs::metadata(&*tmp_dir).is_ok());
         let path = tmp_dir.to_str().unwrap();
-        let client_manager = ClientManager::new();
-        client_manager.load(path).await?;
+        let db = SledDatabase::open(Path::new(&path).join(CLIENT_DB_FILENAME))?;
+        let client_manager = ClientManager::new(Arc::new(Mutex::new(db)));
+        let r = client_manager.load().await;
 
         let expected_label = "7d2ce1a7dec8";
         let user_data: &str = "{\"foo\":\"bar\"}";
