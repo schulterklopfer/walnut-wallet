@@ -30,29 +30,30 @@ lazy_static! {
 static GLOBAL_API: Mutex<Option<API>> = Mutex::const_new(None);
 
 struct API {
+    path: String,
     client_manager: ClientManager,
-    db: Arc<Mutex<SledDatabase>>,
-    db_default_tree: Mutex<SledTree>,
+    db: Arc<SledDatabase>,
+    db_default_tree: SledTree,
 }
 
 pub fn init(path: String) {
     init_tracing();
     RUNTIME.block_on(async {
         if let Ok(db) = SledDatabase::open(Path::new(&path).join(CLIENT_DB_FILENAME)) {
-            let db_arc = Arc::new(Mutex::new(db));
-            if let Ok(tree) = db_arc.clone().lock().await.open_tree(DEFAULT_TREE_ID) {
+            let db_arc = Arc::new(db);
+            if let Ok(tree) = db_arc.clone().open_tree(DEFAULT_TREE_ID) {
                 *GLOBAL_API.lock().await = Some(API {
+                    path: path.clone(),
                     db: db_arc.clone(),
-                    db_default_tree: Mutex::new(tree),
+                    db_default_tree: tree,
                     client_manager: ClientManager::new(db_arc.clone()),
                 })
             }
         }
+        if let Some(api) = &*GLOBAL_API.lock().await {
+            api.client_manager.load();
+        }
     });
-
-    // TODO initial loading of dbs:
-    // load db "labels.db"
-    // load all "<label>.db" files and initialise clients
 
     /*
     RUNTIME.block_on(async {

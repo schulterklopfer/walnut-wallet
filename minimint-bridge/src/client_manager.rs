@@ -16,14 +16,14 @@ static DEFAULT_TREE_ID: &str = "__sled__default";
 pub struct ClientManager {
     clients: Arc<Mutex<HashMap<String, Mutex<Arc<Client>>>>>,
     poller: Mutex<Option<JoinHandle<()>>>,
-    db: Arc<Mutex<SledDatabase>>,
+    db: Arc<SledDatabase>,
 }
 
 // Justin: static function to return a reference to the federation you're working on.
 // Dart side can call methods on it.
 
 impl ClientManager {
-    pub fn new(db: Arc<Mutex<SledDatabase>>) -> ClientManager {
+    pub fn new(db: Arc<SledDatabase>) -> ClientManager {
         ClientManager {
             clients: Arc::new(Mutex::new(HashMap::new())),
             poller: Mutex::new(None),
@@ -41,7 +41,7 @@ impl ClientManager {
         for client_label in client_labels.iter() {
             //let client_db_filename = Path::new(&path).join(client_label);
             if let Some(client) = Client::try_load(
-                self.db.lock().await.open_tree(client_label)?.into(),
+                self.db.open_tree(client_label)?.into(),
                 client_label.as_str(),
             )
             .await?
@@ -84,7 +84,7 @@ impl ClientManager {
 
     pub async fn get_client_labels_from_db(&self) -> Vec<String> {
         // every tree name except the default sled tree name is a client label
-        match self.db.lock().await.tree_names() {
+        match self.db.tree_names() {
             Ok(tree_names) => tree_names
                 .iter()
                 // not sure if this is nice... TODO: revisit
@@ -135,7 +135,7 @@ impl ClientManager {
         if let Err(_) = serde_json::from_str::<WsFederationConnect>(&config_url) {
             return Err(anyhow!("Invalid federation QR / code"));
         }
-        let db = self.db.lock().await.open_tree(label)?;
+        let db = self.db.open_tree(label)?;
         let client = Client::new(db.into(), &config_url, label).await?;
         client.client.fetch_all_coins().await;
 
@@ -205,7 +205,7 @@ impl ClientManager {
     pub async fn delete_client_database(&self, label: &str) -> Result<bool> {
         // Wipe database for client
         // all tokens of client are
-        self.db.lock().await.drop_tree(label)?;
+        self.db.drop_tree(label)?;
         Ok(false) // no tree was deleted, but no error? How?
     }
 }
@@ -239,7 +239,7 @@ mod tests {
         assert!(std::fs::metadata(&*tmp_dir).is_ok());
         let path = tmp_dir.to_str().unwrap();
         let db = SledDatabase::open(Path::new(&path).join(CLIENT_DB_FILENAME))?;
-        let client_manager = ClientManager::new(Arc::new(Mutex::new(db)));
+        let client_manager = ClientManager::new(Arc::new(db));
         let r = client_manager.load().await;
         assert!(r.is_ok());
         Ok(())
@@ -273,7 +273,7 @@ mod tests {
                 &String::from("{\"members\":[[0,\"ws://188.166.55.8:5000\"]]}"),
             )?;
         }
-        let client_manager = ClientManager::new(Arc::new(Mutex::new(db)));
+        let client_manager = ClientManager::new(Arc::new(db));
         let r = client_manager.load().await;
 
         assert!(r.is_ok());
@@ -293,7 +293,7 @@ mod tests {
         assert!(std::fs::metadata(&*tmp_dir).is_ok());
         let path = tmp_dir.to_str().unwrap();
         let db = SledDatabase::open(Path::new(&path).join(CLIENT_DB_FILENAME))?;
-        let client_manager = ClientManager::new(Arc::new(Mutex::new(db)));
+        let client_manager = ClientManager::new(Arc::new(db));
         let r = client_manager.load().await;
 
         let expected_label = "7d2ce1a7dec8";
