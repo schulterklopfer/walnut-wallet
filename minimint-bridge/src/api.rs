@@ -1,10 +1,15 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use bitcoin::hashes::sha256;
 use bitcoin::Network;
+use bitcoin::{hashes::sha256, psbt::Error};
 
 use anyhow::{anyhow, Result};
+use fedimint_api::{
+    db::{Database, DatabaseKeyPrefixConst},
+    encoding::{Decodable, Encodable},
+    NumPeers,
+};
 use lazy_static::lazy_static;
 use lightning_invoice::{Invoice, InvoiceDescription};
 use mint_client::utils::network_to_currency;
@@ -20,6 +25,8 @@ use crate::payments::{PaymentDirection, PaymentStatus};
 static CLIENT_DB_FILENAME: &str = "client.db";
 static DEFAULT_TREE_ID: &str = "__sled__default";
 
+// https://blog.sentry.io/2018/04/05/you-cant-rust-that/
+
 lazy_static! {
     static ref RUNTIME: runtime::Runtime = runtime::Builder::new_multi_thread()
         .enable_all()
@@ -29,14 +36,25 @@ lazy_static! {
 
 static GLOBAL_API: Mutex<Option<API>> = Mutex::const_new(None);
 
+#[derive(Debug, Clone, Encodable, Decodable)]
+pub struct AppDataKey;
+const APP_DATA_KEY_PREFIX: u8 = 0x70;
+
+impl DatabaseKeyPrefixConst for AppDataKey {
+    const DB_PREFIX: u8 = APP_DATA_KEY_PREFIX;
+    type Key = Self;
+
+    type Value = String;
+}
+
 struct API {
     path: String,
     client_manager: ClientManager,
     db: Arc<SledDatabase>,
-    db_default_tree: SledTree,
+    db_default_tree: Database,
 }
 
-pub fn init(path: String) {
+pub fn init(path: String) -> Result<Vec<BridgeClientInfo>> {
     init_tracing();
     RUNTIME.block_on(async {
         if let Ok(db) = SledDatabase::open(Path::new(&path).join(CLIENT_DB_FILENAME)) {
@@ -45,45 +63,42 @@ pub fn init(path: String) {
                 *GLOBAL_API.lock().await = Some(API {
                     path: path.clone(),
                     db: db_arc.clone(),
-                    db_default_tree: tree,
+                    db_default_tree: tree.into(),
                     client_manager: ClientManager::new(db_arc.clone()),
                 })
+            } else {
+                return Err(anyhow!("could not open default tree"));
             }
+        } else {
+            return Err(anyhow!("could not open database"));
         }
         if let Some(api) = &*GLOBAL_API.lock().await {
-            api.client_manager.load();
+            let r = api.client_manager.load().await;
+            if r.is_err() {
+                return Err(anyhow!("could not load client manager"));
+            }
+        } else {
+            return Err(anyhow!("api not configured"));
         }
-    });
-
-    /*
-    RUNTIME.block_on(async {
-        if global_client::is_some().await {
-            return connection_status_private().await;
-        };
-        let filename = Path::new(&path).join("client.db");
-        // TODO: use federation name as "tree"
-        let db = SledDb::open(filename, "client")?;
-        if let Some(client) = Client::try_load(db.into()).await? {
-            let client = Arc::new(client);
-            global_client::set(client.clone()).await;
-            let status = connection_status_private().await?;
-            return Ok(status);
-        }
-        Ok(ConnectionStatus::NotConfigured)
+        _get_clients().await
     })
-    */
 }
 
-/*
-pub async fn delete_database(&self) -> Result<()> {
-  // Wipe database COMPLETELY!!
-  // EVERYTHING IS GONE!!
-  if let Some(user_dir) = self.user_dir.lock().await.as_ref() {
-      std::fs::remove_dir_all(Path::new(&user_dir).join(CLIENT_DB_FILENAME))?;
-  }
-  Ok(())
+pub fn delete_database() -> Result<()> {
+    // Wipe database COMPLETELY!!
+    // EVERYTHING IS GONE!!
+    RUNTIME.block_on(async {
+        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+            let r = std::fs::remove_dir_all(Path::new(&api.path).join(CLIENT_DB_FILENAME));
+            if r.is_ok() {
+                return Ok(());
+            }
+            return Err(anyhow!("unable to delete database"));
+        }
+        return Err(anyhow!("api not configured"));
+    })
 }
- */
+
 /// Bridge representation of a fedimint node
 #[derive(Clone, Debug)]
 pub struct BridgeClientInfo {
@@ -91,6 +106,40 @@ pub struct BridgeClientInfo {
     pub balance: u64,  // balance in satoshis
     pub federation_name: String,
     pub user_data: String, // data which can be set, but is only useful to the user
+}
+
+// utils functions to store some arbitrary inforation in the
+// default tree
+
+pub fn save_app_data(data: String) -> Result<()> {
+    RUNTIME.block_on(async {
+        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+            let r = api.db_default_tree.insert_entry(&AppDataKey, &data);
+            if r.is_err() {
+                return Err(anyhow!("failed to save app data"));
+            }
+            return Ok(());
+        }
+        return Err(anyhow!("api not configured"));
+    })
+}
+
+pub fn fetch_app_data() -> Result<Option<String>> {
+    RUNTIME.block_on(async {
+        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+            api.db_default_tree.get_value(&AppDataKey)?;
+        }
+        return Err(anyhow!("api not configured"));
+    })
+}
+
+pub fn remove_app_data() -> Result<Option<String>> {
+    RUNTIME.block_on(async {
+        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+            api.db_default_tree.remove_entry(&AppDataKey)?;
+        }
+        return Err(anyhow!("api not configured"));
+    })
 }
 
 pub fn get_client(label: String) -> Result<BridgeClientInfo> {
@@ -115,32 +164,35 @@ pub fn get_client(label: String) -> Result<BridgeClientInfo> {
     })
 }
 
-pub fn get_clients() -> Result<Vec<BridgeClientInfo>> {
-    RUNTIME.block_on(async {
+async fn _get_clients() -> Result<Vec<BridgeClientInfo>> {
+    if let Some(api) = GLOBAL_API.lock().await.as_ref() {
         let mut r = Vec::new();
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
-            let client_labels = api.client_manager.get_client_labels().await;
 
-            for client_label in client_labels.iter() {
-                let client_result = api
-                    .client_manager
-                    .get_client_by_label(client_label.as_str())
-                    .await;
+        let client_labels = api.client_manager.get_client_labels().await;
 
-                if client_result.is_ok() {
-                    let client = client_result.unwrap().clone();
-                    r.push(BridgeClientInfo {
-                        label: client_label.clone(),
-                        balance: client.balance(),
-                        federation_name: client.federation_name(),
-                        user_data: client.fetch_user_data(),
-                    })
-                }
+        for client_label in client_labels.iter() {
+            let client_result = api
+                .client_manager
+                .get_client_by_label(client_label.as_str())
+                .await;
+
+            if client_result.is_ok() {
+                let client = client_result.unwrap().clone();
+                r.push(BridgeClientInfo {
+                    label: client_label.clone(),
+                    balance: client.balance(),
+                    federation_name: client.federation_name(),
+                    user_data: client.fetch_user_data(),
+                })
             }
-            return Ok(r);
         }
-        Err(anyhow!("api not configured"))
-    })
+        return Ok(r);
+    }
+    Err(anyhow!("api not configured"))
+}
+
+pub fn get_clients() -> Result<Vec<BridgeClientInfo>> {
+    RUNTIME.block_on(async { _get_clients().await })
 }
 
 pub fn join_federation(config_url: String) -> Result<BridgeClientInfo> {

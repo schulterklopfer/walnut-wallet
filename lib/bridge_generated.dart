@@ -11,9 +11,25 @@ import 'package:meta/meta.dart';
 import 'dart:ffi' as ffi;
 
 abstract class MinimintBridge {
-  Future<void> init({required String path, dynamic hint});
+  Future<List<BridgeClientInfo>> init({required String path, dynamic hint});
 
   FlutterRustBridgeTaskConstMeta get kInitConstMeta;
+
+  Future<void> deleteDatabase({dynamic hint});
+
+  FlutterRustBridgeTaskConstMeta get kDeleteDatabaseConstMeta;
+
+  Future<void> saveAppData({required String data, dynamic hint});
+
+  FlutterRustBridgeTaskConstMeta get kSaveAppDataConstMeta;
+
+  Future<String?> fetchAppData({dynamic hint});
+
+  FlutterRustBridgeTaskConstMeta get kFetchAppDataConstMeta;
+
+  Future<String?> removeAppData({dynamic hint});
+
+  FlutterRustBridgeTaskConstMeta get kRemoveAppDataConstMeta;
 
   Future<BridgeClientInfo> getClient({required String label, dynamic hint});
 
@@ -104,11 +120,13 @@ class BridgeClientInfo {
   final String label;
   final int balance;
   final String federationName;
+  final String userData;
 
   BridgeClientInfo({
     required this.label,
     required this.balance,
     required this.federationName,
+    required this.userData,
   });
 }
 
@@ -197,11 +215,11 @@ class MinimintBridgeImpl implements MinimintBridge {
   factory MinimintBridgeImpl.wasm(FutureOr<WasmModule> module) =>
       MinimintBridgeImpl(module as ExternalLibrary);
   MinimintBridgeImpl.raw(this._platform);
-  Future<void> init({required String path, dynamic hint}) =>
+  Future<List<BridgeClientInfo>> init({required String path, dynamic hint}) =>
       _platform.executeNormal(FlutterRustBridgeTask(
         callFfi: (port_) =>
             _platform.inner.wire_init(port_, _platform.api2wire_String(path)),
-        parseSuccessData: _wire2api_unit,
+        parseSuccessData: _wire2api_list_bridge_client_info,
         constMeta: kInitConstMeta,
         argValues: [path],
         hint: hint,
@@ -211,6 +229,67 @@ class MinimintBridgeImpl implements MinimintBridge {
       const FlutterRustBridgeTaskConstMeta(
         debugName: "init",
         argNames: ["path"],
+      );
+
+  Future<void> deleteDatabase({dynamic hint}) =>
+      _platform.executeNormal(FlutterRustBridgeTask(
+        callFfi: (port_) => _platform.inner.wire_delete_database(port_),
+        parseSuccessData: _wire2api_unit,
+        constMeta: kDeleteDatabaseConstMeta,
+        argValues: [],
+        hint: hint,
+      ));
+
+  FlutterRustBridgeTaskConstMeta get kDeleteDatabaseConstMeta =>
+      const FlutterRustBridgeTaskConstMeta(
+        debugName: "delete_database",
+        argNames: [],
+      );
+
+  Future<void> saveAppData({required String data, dynamic hint}) =>
+      _platform.executeNormal(FlutterRustBridgeTask(
+        callFfi: (port_) => _platform.inner
+            .wire_save_app_data(port_, _platform.api2wire_String(data)),
+        parseSuccessData: _wire2api_unit,
+        constMeta: kSaveAppDataConstMeta,
+        argValues: [data],
+        hint: hint,
+      ));
+
+  FlutterRustBridgeTaskConstMeta get kSaveAppDataConstMeta =>
+      const FlutterRustBridgeTaskConstMeta(
+        debugName: "save_app_data",
+        argNames: ["data"],
+      );
+
+  Future<String?> fetchAppData({dynamic hint}) =>
+      _platform.executeNormal(FlutterRustBridgeTask(
+        callFfi: (port_) => _platform.inner.wire_fetch_app_data(port_),
+        parseSuccessData: _wire2api_opt_String,
+        constMeta: kFetchAppDataConstMeta,
+        argValues: [],
+        hint: hint,
+      ));
+
+  FlutterRustBridgeTaskConstMeta get kFetchAppDataConstMeta =>
+      const FlutterRustBridgeTaskConstMeta(
+        debugName: "fetch_app_data",
+        argNames: [],
+      );
+
+  Future<String?> removeAppData({dynamic hint}) =>
+      _platform.executeNormal(FlutterRustBridgeTask(
+        callFfi: (port_) => _platform.inner.wire_remove_app_data(port_),
+        parseSuccessData: _wire2api_opt_String,
+        constMeta: kRemoveAppDataConstMeta,
+        argValues: [],
+        hint: hint,
+      ));
+
+  FlutterRustBridgeTaskConstMeta get kRemoveAppDataConstMeta =>
+      const FlutterRustBridgeTaskConstMeta(
+        debugName: "remove_app_data",
+        argNames: [],
       );
 
   Future<BridgeClientInfo> getClient({required String label, dynamic hint}) =>
@@ -516,12 +595,13 @@ int _wire2api_box_autoadd_u64(dynamic raw) {
 
 BridgeClientInfo _wire2api_bridge_client_info(dynamic raw) {
   final arr = raw as List<dynamic>;
-  if (arr.length != 3)
-    throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
+  if (arr.length != 4)
+    throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
   return BridgeClientInfo(
     label: _wire2api_String(arr[0]),
     balance: _wire2api_u64(arr[1]),
     federationName: _wire2api_String(arr[2]),
+    userData: _wire2api_String(arr[3]),
   );
 }
 
@@ -595,6 +675,10 @@ List<BridgeGuardianInfo> _wire2api_list_bridge_guardian_info(dynamic raw) {
 
 List<BridgePayment> _wire2api_list_bridge_payment(dynamic raw) {
   return (raw as List<dynamic>).map(_wire2api_bridge_payment).toList();
+}
+
+String? _wire2api_opt_String(dynamic raw) {
+  return raw == null ? null : _wire2api_String(raw);
 }
 
 int? _wire2api_opt_box_autoadd_u64(dynamic raw) {
@@ -740,6 +824,65 @@ class MinimintBridgeWire implements FlutterRustBridgeWireBase {
               ffi.Int64, ffi.Pointer<wire_uint_8_list>)>>('wire_init');
   late final _wire_init = _wire_initPtr
       .asFunction<void Function(int, ffi.Pointer<wire_uint_8_list>)>();
+
+  void wire_delete_database(
+    int port_,
+  ) {
+    return _wire_delete_database(
+      port_,
+    );
+  }
+
+  late final _wire_delete_databasePtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Int64)>>(
+          'wire_delete_database');
+  late final _wire_delete_database =
+      _wire_delete_databasePtr.asFunction<void Function(int)>();
+
+  void wire_save_app_data(
+    int port_,
+    ffi.Pointer<wire_uint_8_list> data,
+  ) {
+    return _wire_save_app_data(
+      port_,
+      data,
+    );
+  }
+
+  late final _wire_save_app_dataPtr = _lookup<
+      ffi.NativeFunction<
+          ffi.Void Function(
+              ffi.Int64, ffi.Pointer<wire_uint_8_list>)>>('wire_save_app_data');
+  late final _wire_save_app_data = _wire_save_app_dataPtr
+      .asFunction<void Function(int, ffi.Pointer<wire_uint_8_list>)>();
+
+  void wire_fetch_app_data(
+    int port_,
+  ) {
+    return _wire_fetch_app_data(
+      port_,
+    );
+  }
+
+  late final _wire_fetch_app_dataPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Int64)>>(
+          'wire_fetch_app_data');
+  late final _wire_fetch_app_data =
+      _wire_fetch_app_dataPtr.asFunction<void Function(int)>();
+
+  void wire_remove_app_data(
+    int port_,
+  ) {
+    return _wire_remove_app_data(
+      port_,
+    );
+  }
+
+  late final _wire_remove_app_dataPtr =
+      _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Int64)>>(
+          'wire_remove_app_data');
+  late final _wire_remove_app_data =
+      _wire_remove_app_dataPtr.asFunction<void Function(int)>();
 
   void wire_get_client(
     int port_,

@@ -39,6 +39,14 @@ void store_dart_post_cobject(DartPostCObjectFnType ptr);
 
 void wire_init(int64_t port_, struct wire_uint_8_list *path);
 
+void wire_delete_database(int64_t port_);
+
+void wire_save_app_data(int64_t port_, struct wire_uint_8_list *data);
+
+void wire_fetch_app_data(int64_t port_);
+
+void wire_remove_app_data(int64_t port_);
+
 void wire_get_client(int64_t port_, struct wire_uint_8_list *label);
 
 void wire_get_clients(int64_t port_);
@@ -89,6 +97,10 @@ void free_WireSyncReturnStruct(struct WireSyncReturnStruct val);
 static int64_t dummy_method_to_enforce_bundling(void) {
     int64_t dummy_var = 0;
     dummy_var ^= ((int64_t) (void*) wire_init);
+    dummy_var ^= ((int64_t) (void*) wire_delete_database);
+    dummy_var ^= ((int64_t) (void*) wire_save_app_data);
+    dummy_var ^= ((int64_t) (void*) wire_fetch_app_data);
+    dummy_var ^= ((int64_t) (void*) wire_remove_app_data);
     dummy_var ^= ((int64_t) (void*) wire_get_client);
     dummy_var ^= ((int64_t) (void*) wire_get_clients);
     dummy_var ^= ((int64_t) (void*) wire_join_federation);
