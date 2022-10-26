@@ -7,14 +7,15 @@ use fedimint_api::BitcoinHash;
 use mint_client::api::WsFederationConnect;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
+
 use tokio::task::JoinHandle;
 extern crate lazy_static;
 
 static DEFAULT_TREE_ID: &str = "__sled__default";
 
 pub struct ClientManager {
-    clients: Arc<Mutex<HashMap<String, Mutex<Arc<Client>>>>>,
+    clients: Arc<RwLock<HashMap<String, RwLock<Arc<Client>>>>>, // Maybe no RwLock for client Arc at all?
     poller: Mutex<Option<JoinHandle<()>>>,
     db: Arc<SledDatabase>,
 }
@@ -25,7 +26,7 @@ pub struct ClientManager {
 impl ClientManager {
     pub fn new(db: Arc<SledDatabase>) -> ClientManager {
         ClientManager {
-            clients: Arc::new(Mutex::new(HashMap::new())),
+            clients: Arc::new(RwLock::new(HashMap::new())),
             poller: Mutex::new(None),
             db: db,
         }
@@ -40,46 +41,56 @@ impl ClientManager {
         let client_labels = self.get_client_labels_from_db().await;
         for client_label in client_labels.iter() {
             //let client_db_filename = Path::new(&path).join(client_label);
-            if let Some(client) = Client::try_load(
+            match Client::try_load(
                 self.db.open_tree(client_label)?.into(),
                 client_label.as_str(),
             )
-            .await?
+            .await
             {
-                let client = Arc::new(client);
-
-                self.clients.lock().await.insert(
-                    String::from(client_label.as_str()),
-                    Mutex::new(client.clone()),
-                );
-                tracing::info!("loading client {}", client_label);
-            } else {
-                tracing::info!("no database for client {}", client_label);
+                Ok(client) => {
+                    let client = Arc::new(client);
+                    {
+                        let mut writeLock =
+                            self.clients.try_write().expect("client map lock poisoned");
+                        writeLock.insert(
+                            String::from(client_label.as_str()),
+                            RwLock::new(client.clone()),
+                        );
+                        drop(writeLock);
+                    }
+                    tracing::info!("loading client {}", client_label);
+                }
+                Err(e) => return Err(e),
             }
         }
 
+        /*
         if self.poller.lock().await.is_none() {
             tracing::info!("polling started");
             *self.poller.lock().await = Some(tokio::spawn({
                 let clients = self.clients.clone();
                 async move {
-                    for (_key, value) in &*clients.lock().await {
-                        tracing::info!("polling {}", value.lock().await.label);
-                        value.lock().await.poll().await;
+                    let readLock = clients.try_read().expect("client map lock poisoned");
+                    for (_key, value) in &*readLock {
+                        let clientReadLock = value.try_read().expect("client lock poisoned");
+                        tracing::info!("polling {}", clientReadLock.label);
+                        clientReadLock.poll().await;
                     }
+                    drop(readLock);
                 }
             }));
         }
+         */
 
         Ok(())
     }
 
     pub async fn get_client_count(&self) -> usize {
-        self.clients.lock().await.len()
+        self.clients.read().await.len()
     }
 
     pub async fn get_client_labels(&self) -> Vec<String> {
-        self.clients.lock().await.keys().cloned().collect()
+        self.clients.read().await.keys().cloned().collect()
     }
 
     pub async fn get_client_labels_from_db(&self) -> Vec<String> {
@@ -96,21 +107,21 @@ impl ClientManager {
     }
 
     pub async fn client_exists(&self, label: &str) -> bool {
-        self.clients.lock().await.contains_key(label)
+        self.clients.read().await.contains_key(label)
     }
 
     pub async fn get_client_by_label(&self, label: &str) -> Result<Arc<Client>> {
-        if self.clients.lock().await.len() == 0 {
+        if self.clients.read().await.len() == 0 {
             return Err(anyhow!("join a federation first"));
         }
 
         let client = self
             .clients
-            .lock()
+            .read()
             .await
             .get(label)
             .ok_or(anyhow!("no such client"))?
-            .lock()
+            .read()
             .await
             .clone();
 
@@ -128,7 +139,7 @@ impl ClientManager {
         let sanitized_config = serde_json::to_string(&to_serialise)?;
         tracing::info!("Sanitized config: {}", sanitized_config);
         let label = &Hash::hash(sanitized_config.as_bytes()).to_hex()[0..12];
-        if self.clients.lock().await.contains_key(label) {
+        if self.clients.read().await.contains_key(label) {
             return Err(anyhow!("Can't add client twice"));
         }
         // FIXME: just doing this twice so that I can report a better error
@@ -137,38 +148,46 @@ impl ClientManager {
         }
         let db = self.db.open_tree(label)?;
         let client = Client::new(db.into(), &config_url, label).await?;
-        client.client.fetch_all_coins().await;
-
         let client_arc = Arc::new(client);
+        if let Some(c) = client_arc.client.as_ref() {
+            c.fetch_all_coins().await;
+        }
         // for good measure, make sure the balance is updated (FIXME)
-        self.clients
-            .lock()
-            .await
-            .insert(String::from(label), Mutex::new(client_arc.clone()));
+        let mut writeLock = self.clients.write().await;
+        writeLock.insert(String::from(label), RwLock::new(client_arc.clone()));
+        drop(writeLock);
         tracing::info!("Client added {}", label);
+        /*
         if self.poller.lock().await.is_none() {
             tracing::info!("polling started");
 
             *self.poller.lock().await = Some(tokio::spawn({
                 let clients = self.clients.clone();
                 async move {
-                    for (_key, value) in &*clients.lock().await {
-                        tracing::info!("polling {}", value.lock().await.label);
-                        value.lock().await.poll().await;
+                    for (_key, value) in &*clients.read().await {
+                        tracing::info!("polling {}", value.read().await.label);
+                        value.read().await.poll().await;
                     }
                 }
             }));
         }
-        Ok(client_arc.clone())
+         */
+        return Ok(client_arc.clone());
     }
 
     pub async fn remove_client(&self, label: &str) -> Result<()> {
         // Remove client at index
-
-        self.clients.lock().await.remove(label);
+        tracing::info!("waiting for write lock {}", label);
+        let mut writeLock = self.clients.write().await;
+        let value = writeLock.remove(label);
+        drop(writeLock);
+        if value.is_none() {
+            return Err(anyhow!("client does not exist"));
+        }
         tracing::info!("Client removed {}", label);
 
-        if self.clients.lock().await.len() == 0 {
+        /*
+        if self.clients.read().await.len() == 0 {
             {
                 // Kill poller, when there are no more clients anymore
                 let poller = self.poller.lock().await;
@@ -181,6 +200,7 @@ impl ClientManager {
             }
             *self.poller.lock().await = None;
         }
+         */
 
         Ok(())
     }
@@ -195,10 +215,10 @@ impl ClientManager {
         }
     }
 
-    pub async fn fetch_user_data_for_client(&self, label: &str) -> String {
+    pub async fn fetch_user_data_for_client(&self, label: &str) -> Option<String> {
         match self.get_client_by_label(label).await {
             Ok(client) => client.fetch_user_data(),
-            Err(_) => String::from(""),
+            Err(_) => None,
         }
     }
 
@@ -216,7 +236,7 @@ mod tests {
     use fedimint_api::db::Database;
 
     use super::*;
-    use crate::client::ConfigKey;
+    use crate::client::{ConfigKey, ConnectionStatus};
     use crate::init_tracing;
     use crate::tests::TestResult;
 
@@ -270,7 +290,7 @@ mod tests {
             let data: Database = tree.into();
             data.insert_entry(
                 &ConfigKey,
-                &String::from("{\"members\":[[0,\"ws://188.166.55.8:5000\"]]}"),
+                &String::from("{\"members\":[[0,\"ws://foobar.nonexisting\"]]}"),
             )?;
         }
         let client_manager = ClientManager::new(Arc::new(db));
@@ -281,6 +301,18 @@ mod tests {
         let client_labels = client_manager.get_client_labels().await;
         assert!(client_labels.contains(&String::from(client_label1)));
         assert!(client_labels.contains(&String::from(client_label2)));
+
+        if let Ok(client) = client_manager.get_client_by_label(client_label1).await {
+            assert_eq!(client.connection_status, ConnectionStatus::Connected);
+        } else {
+            assert!(false);
+        }
+
+        if let Ok(client) = client_manager.get_client_by_label(client_label2).await {
+            assert_eq!(client.connection_status, ConnectionStatus::NotConnected);
+        } else {
+            assert!(false);
+        }
 
         Ok(())
     }
@@ -326,7 +358,8 @@ mod tests {
             .fetch_user_data_for_client(expected_label)
             .await;
 
-        assert_eq!(v, user_data);
+        assert!(v.is_some());
+        assert_eq!(v.unwrap(), user_data);
 
         client_manager.remove_client(expected_label).await?;
 

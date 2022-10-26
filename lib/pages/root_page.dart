@@ -5,14 +5,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:walnut/constants.dart';
 
-const _wallets = ["fedimint 1", "fedimint 2", "cashu 1"];
+import '../ffi.dart';
+import '../providers/mints.dart';
 
 class RootPage extends ConsumerWidget {
-  RootPage({super.key});
+  const RootPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     Size screenSize = MediaQuery.of(context).size;
+
+    final clients = ref.watch(clientListProvider);
+    final ClientListNotifier clientListNotifier =
+        ref.watch(clientListProvider.notifier);
     return Scaffold(
         appBar: AppBar(
           title: const Text('Wallets'),
@@ -21,29 +26,69 @@ class RootPage extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
-              width: screenSize.width,
-              height: screenSize.height * 0.3,
-              child: Swiper(
-                layout: SwiperLayout.DEFAULT,
-                viewportFraction: 0.85,
-                itemBuilder: (BuildContext context, int index) {
-                  return Card(
-                      margin: EdgeInsets.fromLTRB(
-                          5, 10, 5, _wallets.length > 1 ? 35 : 10),
-                      child: Center(child: Text(_wallets[index])));
-                },
-                itemCount: _wallets.length,
-                loop: false,
-                pagination: _wallets.length > 1
-                    ? const SwiperPagination(
-                        alignment: Alignment.bottomCenter,
-                        builder: DotSwiperPaginationBuilder(
-                          color: Colors.grey,
-                        ),
-                      )
-                    : null,
-              ),
-            ),
+                width: screenSize.width,
+                height: screenSize.height * 0.3,
+                child: clients.when(
+                  data: (l) => Swiper(
+                    layout: SwiperLayout.DEFAULT,
+                    viewportFraction: 0.85,
+                    itemBuilder: (BuildContext context, int index) {
+                      return Card(
+                          margin: EdgeInsets.fromLTRB(
+                              5, 10, 5, l.length > 1 ? 35 : 10),
+                          child: Column(
+                            children: [
+                              Center(child: Text(l[index].label)),
+                              TextButton(
+                                style: ButtonStyle(
+                                  foregroundColor:
+                                      MaterialStateProperty.all<Color>(
+                                          Colors.blue),
+                                ),
+                                onPressed: () async {
+                                  try {
+                                    clientListNotifier
+                                        .leaveFederation(l[index].label);
+                                  } catch (e) {
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(SnackBar(
+                                            behavior: SnackBarBehavior.fixed,
+                                            content: Container(
+                                              padding: const EdgeInsets.all(8),
+                                              height: 70,
+                                              decoration: const BoxDecoration(
+                                                color: Colors.blue,
+                                                borderRadius: BorderRadius.all(
+                                                    Radius.circular(15)),
+                                              ),
+                                              child: Center(
+                                                child: Text(
+                                                  e.toString(),
+                                                ),
+                                              ),
+                                            )));
+                                  }
+                                },
+                                child: Text('TextButton'),
+                              )
+                            ],
+                          ));
+                    },
+                    itemCount: l.length,
+                    loop: false,
+                    pagination: l.length > 1
+                        ? const SwiperPagination(
+                            alignment: Alignment.bottomCenter,
+                            builder: DotSwiperPaginationBuilder(
+                              color: Colors.grey,
+                            ),
+                          )
+                        : null,
+                  ),
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (e, st) => Center(child: Text(e.toString())),
+                )),
           ],
         ),
         floatingActionButton: FloatingActionButton(

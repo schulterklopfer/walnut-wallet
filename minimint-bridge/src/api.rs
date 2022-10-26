@@ -1,8 +1,9 @@
-use std::path::Path;
-use std::sync::Arc;
-
 use bitcoin::Network;
 use bitcoin::{hashes::sha256, psbt::Error};
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::sleep;
 
 use anyhow::{anyhow, Result};
 use fedimint_api::{
@@ -13,8 +14,8 @@ use fedimint_api::{
 use lazy_static::lazy_static;
 use lightning_invoice::{Invoice, InvoiceDescription};
 use mint_client::utils::network_to_currency;
-use tokio::runtime;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
+use tokio::{runtime, time};
 
 use crate::client::ConnectionStatus;
 use crate::client_manager::ClientManager;
@@ -34,7 +35,7 @@ lazy_static! {
         .expect("failed to build runtime");
 }
 
-static GLOBAL_API: Mutex<Option<API>> = Mutex::const_new(None);
+static GLOBAL_API: RwLock<Option<API>> = RwLock::const_new(None);
 
 #[derive(Debug, Clone, Encodable, Decodable)]
 pub struct AppDataKey;
@@ -60,7 +61,7 @@ pub fn init(path: String) -> Result<Vec<BridgeClientInfo>> {
         if let Ok(db) = SledDatabase::open(Path::new(&path).join(CLIENT_DB_FILENAME)) {
             let db_arc = Arc::new(db);
             if let Ok(tree) = db_arc.clone().open_tree(DEFAULT_TREE_ID) {
-                *GLOBAL_API.lock().await = Some(API {
+                *GLOBAL_API.write().await = Some(API {
                     path: path.clone(),
                     db: db_arc.clone(),
                     db_default_tree: tree.into(),
@@ -72,7 +73,7 @@ pub fn init(path: String) -> Result<Vec<BridgeClientInfo>> {
         } else {
             return Err(anyhow!("could not open database"));
         }
-        if let Some(api) = &*GLOBAL_API.lock().await {
+        if let Some(api) = &*GLOBAL_API.read().await {
             let r = api.client_manager.load().await;
             if r.is_err() {
                 return Err(anyhow!("could not load client manager"));
@@ -88,7 +89,7 @@ pub fn delete_database() -> Result<()> {
     // Wipe database COMPLETELY!!
     // EVERYTHING IS GONE!!
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
             let r = std::fs::remove_dir_all(Path::new(&api.path).join(CLIENT_DB_FILENAME));
             if r.is_ok() {
                 return Ok(());
@@ -104,8 +105,10 @@ pub fn delete_database() -> Result<()> {
 pub struct BridgeClientInfo {
     pub label: String, // unique label of the client
     pub balance: u64,  // balance in satoshis
-    pub federation_name: String,
-    pub user_data: String, // data which can be set, but is only useful to the user
+    pub config_json: String,
+    pub connection_status: ConnectionStatus,
+    pub federation_name: Option<String>,
+    pub user_data: Option<String>, // data which can be set, but is only useful to the user
 }
 
 // utils functions to store some arbitrary inforation in the
@@ -113,7 +116,7 @@ pub struct BridgeClientInfo {
 
 pub fn save_app_data(data: String) -> Result<()> {
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
             let r = api.db_default_tree.insert_entry(&AppDataKey, &data);
             if r.is_err() {
                 return Err(anyhow!("failed to save app data"));
@@ -126,7 +129,7 @@ pub fn save_app_data(data: String) -> Result<()> {
 
 pub fn fetch_app_data() -> Result<Option<String>> {
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
             api.db_default_tree.get_value(&AppDataKey)?;
         }
         return Err(anyhow!("api not configured"));
@@ -135,7 +138,7 @@ pub fn fetch_app_data() -> Result<Option<String>> {
 
 pub fn remove_app_data() -> Result<Option<String>> {
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
             api.db_default_tree.remove_entry(&AppDataKey)?;
         }
         return Err(anyhow!("api not configured"));
@@ -144,29 +147,27 @@ pub fn remove_app_data() -> Result<Option<String>> {
 
 pub fn get_client(label: String) -> Result<BridgeClientInfo> {
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
-            let client_result = api.client_manager.get_client_by_label(label.as_str()).await;
-
-            if client_result.is_err() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
+            if let Ok(client) = api.client_manager.get_client_by_label(label.as_str()).await {
+                return Ok(BridgeClientInfo {
+                    label: label.clone(),
+                    balance: client.clone().balance(),
+                    config_json: client.cfg_json.clone(),
+                    connection_status: client.connection_status.clone(),
+                    federation_name: client.federation_name(),
+                    user_data: client.fetch_user_data(),
+                });
+            } else {
                 return Err(anyhow!("no such client"));
             }
-
-            let client = client_result.unwrap().clone();
-
-            return Ok(BridgeClientInfo {
-                label: label.clone(),
-                balance: client.balance(),
-                federation_name: client.federation_name(),
-                user_data: client.fetch_user_data(),
-            });
         }
         Err(anyhow!("api not configured"))
     })
 }
 
 async fn _get_clients() -> Result<Vec<BridgeClientInfo>> {
-    if let Some(api) = GLOBAL_API.lock().await.as_ref() {
-        let mut r = Vec::new();
+    if let Some(api) = GLOBAL_API.read().await.as_ref() {
+        let mut r = vec![];
 
         let client_labels = api.client_manager.get_client_labels().await;
 
@@ -176,11 +177,12 @@ async fn _get_clients() -> Result<Vec<BridgeClientInfo>> {
                 .get_client_by_label(client_label.as_str())
                 .await;
 
-            if client_result.is_ok() {
-                let client = client_result.unwrap().clone();
+            if let Ok(client) = client_result.as_ref() {
                 r.push(BridgeClientInfo {
                     label: client_label.clone(),
                     balance: client.balance(),
+                    config_json: client.cfg_json.clone(),
+                    connection_status: client.connection_status.clone(),
                     federation_name: client.federation_name(),
                     user_data: client.fetch_user_data(),
                 })
@@ -198,11 +200,13 @@ pub fn get_clients() -> Result<Vec<BridgeClientInfo>> {
 pub fn join_federation(config_url: String) -> Result<BridgeClientInfo> {
     // TODO: throw error when federation was already joined
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
             let client = api.client_manager.add_client(config_url.as_str()).await?;
             return Ok(BridgeClientInfo {
                 label: client.label.clone(),
                 balance: client.balance(),
+                config_json: client.cfg_json.clone(),
+                connection_status: client.connection_status.clone(),
                 federation_name: client.federation_name(),
                 user_data: client.fetch_user_data(),
             });
@@ -213,12 +217,21 @@ pub fn join_federation(config_url: String) -> Result<BridgeClientInfo> {
 
 /// Unset client and wipe database. Ecash will be destroyed. Use with caution!!!
 pub fn leave_federation(label: String) -> Result<()> {
+    tracing::info!("leave_federation 1 {}", label);
+
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        tracing::info!("leave_federation 2 {}", label);
+
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
+            tracing::info!("leave_federation 3 {}", label);
+
             api.client_manager.remove_client(label.as_str()).await?;
+            tracing::info!("leave_federation 4 {}", label);
+
             api.client_manager
                 .delete_client_database(label.as_str())
                 .await?;
+            tracing::info!("left federation {}", label);
             return Ok(());
         }
         Err(anyhow!("api not configured"))
@@ -227,7 +240,7 @@ pub fn leave_federation(label: String) -> Result<()> {
 
 pub fn balance(label: String) -> Result<u64> {
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
             return Ok(api
                 .client_manager
                 .get_client_by_label(label.as_str())
@@ -240,7 +253,7 @@ pub fn balance(label: String) -> Result<u64> {
 
 pub fn pay(label: String, bolt11: String) -> Result<()> {
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
             return api
                 .client_manager
                 .get_client_by_label(label.as_str())
@@ -254,14 +267,16 @@ pub fn pay(label: String, bolt11: String) -> Result<()> {
 
 pub fn invoice(label: String, amount: u64, description: String) -> Result<String> {
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
             let client = api
                 .client_manager
                 .get_client_by_label(label.as_str())
                 .await?;
 
-            if client.network() == Network::Bitcoin && amount > 60000 {
-                return Err(anyhow!("Maximum invoice size on mainnet is 60000 sats"));
+            if let Some(network) = client.network() {
+                if network == Network::Bitcoin && amount > 60000 {
+                    return Err(anyhow!("Maximum invoice size on mainnet is 60000 sats"));
+                }
             }
 
             return client.invoice(amount, description).await;
@@ -292,7 +307,7 @@ pub struct BridgeInvoice {
 pub fn fetch_payment(label: String, payment_hash: String) -> Result<BridgePayment> {
     let hash: sha256::Hash = payment_hash.parse()?;
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
             let payment = api
                 .client_manager
                 .get_client_by_label(label.as_str())
@@ -314,7 +329,7 @@ pub fn fetch_payment(label: String, payment_hash: String) -> Result<BridgePaymen
 pub fn list_payments(label: String) -> Result<Vec<BridgePayment>> {
     println!("Listing payments...");
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
             let payments = api
                 .client_manager
                 .get_client_by_label(label.as_str())
@@ -339,7 +354,7 @@ pub fn list_payments(label: String) -> Result<Vec<BridgePayment>> {
 }
 
 async fn configured_status_private(label: &str) -> Result<bool> {
-    if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+    if let Some(api) = GLOBAL_API.read().await.as_ref() {
         return Ok(api.client_manager.client_exists(label).await);
     }
     Err(anyhow!("api not configured"))
@@ -349,41 +364,36 @@ pub fn configured_status(label: String) -> Result<bool> {
     RUNTIME.block_on(async { configured_status_private(label.as_str()).await })
 }
 
-async fn connection_status_private(label: &str) -> Result<ConnectionStatus> {
-    if let Some(api) = GLOBAL_API.lock().await.as_ref() {
-        if !api.client_manager.client_exists(label).await {
-            return Ok(ConnectionStatus::NotConfigured);
-        }
-        return match api
-            .client_manager
-            .get_client_by_label(label)
-            .await?
-            .check_connection()
-            .await
-        {
-            true => Ok(ConnectionStatus::Connected),
-            false => Ok(ConnectionStatus::NotConnected),
-        };
+async fn _connection_status(label: &str) -> Result<ConnectionStatus> {
+    if let Some(api) = GLOBAL_API.read().await.as_ref() {
+        let client = api.client_manager.get_client_by_label(label).await?;
+        return Ok(client.connection_status.clone());
     }
     Err(anyhow!("api not configured"))
 }
 
 pub fn connection_status(label: String) -> Result<ConnectionStatus> {
-    RUNTIME.block_on(async { connection_status_private(label.as_str()).await })
+    RUNTIME.block_on(async { _connection_status(label.as_str()).await })
+}
+
+async fn _network(label: String) -> Result<String> {
+    if let Some(api) = GLOBAL_API.read().await.as_ref() {
+        if let Some(network) = api
+            .client_manager
+            .get_client_by_label(label.as_str())
+            .await?
+            .network()
+        {
+            return Ok(network.to_string());
+        } else {
+            return Err(anyhow!("client not connected"));
+        }
+    }
+    Err(anyhow!("api not configured"))
 }
 
 pub fn network(label: String) -> Result<String> {
-    RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
-            return Ok(api
-                .client_manager
-                .get_client_by_label(label.as_str())
-                .await?
-                .network()
-                .to_string());
-        }
-        Err(anyhow!("api not configured"))
-    })
+    RUNTIME.block_on(async { _network(label).await })
 }
 
 pub fn calculate_fee(bolt11: String) -> Result<Option<u64>> {
@@ -468,7 +478,7 @@ pub fn switch_federation(_federation: BridgeFederationInfo) -> Result<()> {
 /// Decodes an invoice and checks that we can pay it
 pub fn decode_invoice(label: String, bolt11: String) -> Result<BridgeInvoice> {
     RUNTIME.block_on(async {
-        if let Some(api) = GLOBAL_API.lock().await.as_ref() {
+        if let Some(api) = GLOBAL_API.read().await.as_ref() {
             let client = api
                 .client_manager
                 .get_client_by_label(label.as_str())
@@ -480,12 +490,16 @@ pub fn decode_invoice(label: String, bolt11: String) -> Result<BridgeInvoice> {
             if !client.can_pay(&invoice) {
                 return Err(anyhow!("Can't pay invoice twice"));
             }
-            if network_to_currency(client.network()) != invoice.currency() {
-                return Err(anyhow!(format!(
-                    "Wrong network. Expected {}, got {}",
-                    network_to_currency(client.network()),
-                    invoice.currency()
-                )));
+            if let Some(network) = client.network() {
+                if network_to_currency(network) != invoice.currency() {
+                    return Err(anyhow!(format!(
+                        "Wrong network. Expected {}, got {}",
+                        network_to_currency(network),
+                        invoice.currency()
+                    )));
+                }
+            } else {
+                return Err(anyhow!("client not connected"));
             }
             if invoice.is_expired() {
                 return Err(anyhow!("Invoice is expired"));
@@ -518,4 +532,30 @@ fn decode_invoice_inner(invoice: &Invoice) -> anyhow::Result<BridgeInvoice> {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+    use crate::client::{ConfigKey, ConnectionStatus};
+    use crate::init_tracing;
+    use crate::tests::TestResult;
+
+    use std::path::Path;
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+    static CLIENT_DB_FILENAME: &str = "client.db";
+
+    #[test]
+    fn test_init() -> TestResult {
+        let tmp_dir = tmp_env::create_temp_dir().expect("cannot create temp dir");
+        assert!(std::fs::metadata(&*tmp_dir).is_ok());
+        let path = tmp_dir.to_str().unwrap();
+
+        let _ = init(String::from(path));
+        let _ = join_federation(String::from(
+            "{\"members\":[[0,\"wss://fm-signet.sirion.io:443\"]]}",
+        ));
+        let _ = get_clients();
+
+        Ok(())
+    }
+}

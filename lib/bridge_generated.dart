@@ -119,14 +119,18 @@ abstract class MinimintBridge {
 class BridgeClientInfo {
   final String label;
   final int balance;
-  final String federationName;
-  final String userData;
+  final String configJson;
+  final ConnectionStatus connectionStatus;
+  final String? federationName;
+  final String? userData;
 
   BridgeClientInfo({
     required this.label,
     required this.balance,
-    required this.federationName,
-    required this.userData,
+    required this.configJson,
+    required this.connectionStatus,
+    this.federationName,
+    this.userData,
   });
 }
 
@@ -189,9 +193,9 @@ class BridgePayment {
 }
 
 enum ConnectionStatus {
-  NotConfigured,
   NotConnected,
   Connected,
+  NotConfigured,
 }
 
 enum PaymentDirection {
@@ -595,13 +599,15 @@ int _wire2api_box_autoadd_u64(dynamic raw) {
 
 BridgeClientInfo _wire2api_bridge_client_info(dynamic raw) {
   final arr = raw as List<dynamic>;
-  if (arr.length != 4)
-    throw Exception('unexpected arr length: expect 4 but see ${arr.length}');
+  if (arr.length != 6)
+    throw Exception('unexpected arr length: expect 6 but see ${arr.length}');
   return BridgeClientInfo(
     label: _wire2api_String(arr[0]),
     balance: _wire2api_u64(arr[1]),
-    federationName: _wire2api_String(arr[2]),
-    userData: _wire2api_String(arr[3]),
+    configJson: _wire2api_String(arr[2]),
+    connectionStatus: _wire2api_connection_status(arr[3]),
+    federationName: _wire2api_opt_String(arr[4]),
+    userData: _wire2api_opt_String(arr[5]),
   );
 }
 

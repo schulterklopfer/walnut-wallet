@@ -7,5 +7,7 @@
 			"path": "minimint-bridge"
 		}
 	],
-  "settings": {}
+  "settings": {
+    "java.configuration.updateBuildConfiguration": "interactive"
+  }
 }

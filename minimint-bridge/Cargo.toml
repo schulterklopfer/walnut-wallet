@@ -29,7 +29,7 @@ lightning-invoice = "0.18.0"
 tracing = "0.1.26"
 
 tracing-subscriber = { version = "0.3.1", features = [ "env-filter" ] }
-flutter_rust_bridge = "1.48.0"
+flutter_rust_bridge = "1.48.1"
 sled = "0.34.6"
 tokio = {version = "1.0", features = ["full"]}
 tokio-test = "0.4.2"

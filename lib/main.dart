@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'color_schemes.g.dart';
 import 'router.dart';
+import 'ffi.dart';
 
 // https://riverpod.dev/
 // https://github.com/anthonyaquino83/riverpodsqlitecrud/blob/main/lib/views/note_list.dart
@@ -20,7 +22,18 @@ import 'router.dart';
 // https://bestflutterpack.com/progress-bar-widgets-for-flutter/
 // https://bestflutterpack.com/how-to-build-pull-down-to-refresh-functionality-in-flutter/
 // https://bestflutterpack.com/infinite-scroll-pagination-in-flutter/
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    final userDir = (await getApplicationDocumentsDirectory()).path;
+    await api.init(path: userDir);
+    //final l = await api.getClients();
+    debugPrint("init success");
+  } catch (e) {
+    debugPrint('Caught error in init: $e');
+  }
+
   runApp(const ProviderScope(child: MyApp()));
 }
 

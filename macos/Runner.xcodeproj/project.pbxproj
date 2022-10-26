@@ -26,6 +26,8 @@
 		33CC10F32044A3C60003C045 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F22044A3C60003C045 /* Assets.xcassets */; };
 		33CC10F62044A3C60003C045 /* MainMenu.xib in Resources */ = {isa = PBXBuildFile; fileRef = 33CC10F42044A3C60003C045 /* MainMenu.xib */; };
 		33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC11122044BFA00003C045 /* MainFlutterWindow.swift */; };
+		6E24AAD528BD9F7A002F45B1 /* libminimint-bridge_static.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 6E24AAD028BD9D6D002F45B1 /* libminimint-bridge_static.a */; };
+		8E2193B11A39F6A15AD9BA97 /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A638F82B11816F36070305A0 /* Pods_Runner.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -35,6 +37,20 @@
 			proxyType = 1;
 			remoteGlobalIDString = 33CC111A2044C6BA0003C045;
 			remoteInfo = FLX;
+		};
+		6E24AACF28BD9D6D002F45B1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6E24AACB28BD9D6D002F45B1 /* minimint-bridge.xcodeproj */;
+			proxyType = 2;
+			remoteGlobalIDString = CA60AA3689D6BE71F52C75AC;
+			remoteInfo = "minimint-bridge-staticlib";
+		};
+		6E24AAD128BD9D8A002F45B1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 6E24AACB28BD9D6D002F45B1 /* minimint-bridge.xcodeproj */;
+			proxyType = 1;
+			remoteGlobalIDString = CA60AA3689D62C3761166523;
+			remoteInfo = "minimint-bridge-staticlib";
 		};
 /* End PBXContainerItemProxy section */
 
@@ -54,7 +70,7 @@
 /* Begin PBXFileReference section */
 		333000ED22D3DE5D00554162 /* Warnings.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Warnings.xcconfig; sourceTree = "<group>"; };
 		335BBD1A22A9A15E00E9071D /* GeneratedPluginRegistrant.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = GeneratedPluginRegistrant.swift; sourceTree = "<group>"; };
-		33CC10ED2044A3C60003C045 /* walnut.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "walnut.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		33CC10ED2044A3C60003C045 /* fluttermint.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = fluttermint.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		33CC10F02044A3C60003C045 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		33CC10F22044A3C60003C045 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Assets.xcassets; path = Runner/Assets.xcassets; sourceTree = "<group>"; };
 		33CC10F52044A3C60003C045 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.xib; name = Base; path = Base.lproj/MainMenu.xib; sourceTree = "<group>"; };
@@ -66,8 +82,13 @@
 		33E51913231747F40026EE4D /* DebugProfile.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = DebugProfile.entitlements; sourceTree = "<group>"; };
 		33E51914231749380026EE4D /* Release.entitlements */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.entitlements; path = Release.entitlements; sourceTree = "<group>"; };
 		33E5194F232828860026EE4D /* AppInfo.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = AppInfo.xcconfig; sourceTree = "<group>"; };
+		4957D26F29264BA81A878AEC /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
+		5B16FE20128C16D5B6AB7CEC /* Pods-Runner.profile.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.profile.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.profile.xcconfig"; sourceTree = "<group>"; };
+		5E108007AD5E32F3107B01FA /* Pods-Runner.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.release.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.release.xcconfig"; sourceTree = "<group>"; };
+		6E24AACB28BD9D6D002F45B1 /* minimint-bridge.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; name = "minimint-bridge.xcodeproj"; path = "../../minimint-bridge/minimint-bridge.xcodeproj"; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		A638F82B11816F36070305A0 /* Pods_Runner.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Runner.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -75,12 +96,24 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6E24AAD528BD9F7A002F45B1 /* libminimint-bridge_static.a in Frameworks */,
+				8E2193B11A39F6A15AD9BA97 /* Pods_Runner.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		212FB172831E66AD741CC5CF /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				4957D26F29264BA81A878AEC /* Pods-Runner.debug.xcconfig */,
+				5E108007AD5E32F3107B01FA /* Pods-Runner.release.xcconfig */,
+				5B16FE20128C16D5B6AB7CEC /* Pods-Runner.profile.xcconfig */,
+			);
+			path = Pods;
+			sourceTree = "<group>";
+		};
 		33BA886A226E78AF003329D5 /* Configs */ = {
 			isa = PBXGroup;
 			children = (
@@ -99,13 +132,14 @@
 				33CEB47122A05771004F2AC0 /* Flutter */,
 				33CC10EE2044A3C60003C045 /* Products */,
 				D73912EC22F37F3D000D13A0 /* Frameworks */,
+				212FB172831E66AD741CC5CF /* Pods */,
 			);
 			sourceTree = "<group>";
 		};
 		33CC10EE2044A3C60003C045 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				33CC10ED2044A3C60003C045 /* walnut.app */,
+				33CC10ED2044A3C60003C045 /* fluttermint.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -135,6 +169,7 @@
 		33FAB671232836740065AC1E /* Runner */ = {
 			isa = PBXGroup;
 			children = (
+				6E24AACB28BD9D6D002F45B1 /* minimint-bridge.xcodeproj */,
 				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
@@ -145,9 +180,18 @@
 			path = Runner;
 			sourceTree = "<group>";
 		};
+		6E24AACC28BD9D6D002F45B1 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				6E24AAD028BD9D6D002F45B1 /* libminimint-bridge_static.a */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
 		D73912EC22F37F3D000D13A0 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				A638F82B11816F36070305A0 /* Pods_Runner.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -159,20 +203,23 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 33CC10FB2044A3C60003C045 /* Build configuration list for PBXNativeTarget "Runner" */;
 			buildPhases = (
+				206A4324DD2003B15BBDD006 /* [CP] Check Pods Manifest.lock */,
 				33CC10E92044A3C60003C045 /* Sources */,
 				33CC10EA2044A3C60003C045 /* Frameworks */,
 				33CC10EB2044A3C60003C045 /* Resources */,
 				33CC110E2044A8840003C045 /* Bundle Framework */,
 				3399D490228B24CF009A79C7 /* ShellScript */,
+				4A2BCA286416104BD6E29035 /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				6E24AAD228BD9D8A002F45B1 /* PBXTargetDependency */,
 				33CC11202044C79F0003C045 /* PBXTargetDependency */,
 			);
 			name = Runner;
 			productName = Runner;
-			productReference = 33CC10ED2044A3C60003C045 /* walnut.app */;
+			productReference = 33CC10ED2044A3C60003C045 /* fluttermint.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -212,6 +259,12 @@
 			mainGroup = 33CC10E42044A3C60003C045;
 			productRefGroup = 33CC10EE2044A3C60003C045 /* Products */;
 			projectDirPath = "";
+			projectReferences = (
+				{
+					ProductGroup = 6E24AACC28BD9D6D002F45B1 /* Products */;
+					ProjectRef = 6E24AACB28BD9D6D002F45B1 /* minimint-bridge.xcodeproj */;
+				},
+			);
 			projectRoot = "";
 			targets = (
 				33CC10EC2044A3C60003C045 /* Runner */,
@@ -219,6 +272,16 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXReferenceProxy section */
+		6E24AAD028BD9D6D002F45B1 /* libminimint-bridge_static.a */ = {
+			isa = PBXReferenceProxy;
+			fileType = archive.ar;
+			path = "libminimint-bridge_static.a";
+			remoteRef = 6E24AACF28BD9D6D002F45B1 /* PBXContainerItemProxy */;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+/* End PBXReferenceProxy section */
 
 /* Begin PBXResourcesBuildPhase section */
 		33CC10EB2044A3C60003C045 /* Resources */ = {
@@ -233,6 +296,28 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		206A4324DD2003B15BBDD006 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-Runner-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
 		3399D490228B24CF009A79C7 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -270,6 +355,23 @@
 			shellPath = /bin/sh;
 			shellScript = "\"$FLUTTER_ROOT\"/packages/flutter_tools/bin/macos_assemble.sh && touch Flutter/ephemeral/tripwire";
 		};
+		4A2BCA286416104BD6E29035 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Runner/Pods-Runner-frameworks.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -290,6 +392,11 @@
 			isa = PBXTargetDependency;
 			target = 33CC111A2044C6BA0003C045 /* Flutter Assemble */;
 			targetProxy = 33CC111F2044C79F0003C045 /* PBXContainerItemProxy */;
+		};
+		6E24AAD228BD9D8A002F45B1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = "minimint-bridge-staticlib";
+			targetProxy = 6E24AAD128BD9D8A002F45B1 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -344,7 +451,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 10.11;
+				MACOSX_DEPLOYMENT_TARGET = 12.3;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -361,12 +468,15 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = JBLHZ83X6T;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 12.3;
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = Runner/bridge_generated.h;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Profile;
@@ -423,7 +533,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 10.11;
+				MACOSX_DEPLOYMENT_TARGET = 12.3;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
@@ -470,7 +580,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 10.11;
+				MACOSX_DEPLOYMENT_TARGET = 12.3;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
@@ -487,12 +597,15 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = JBLHZ83X6T;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 12.3;
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = Runner/bridge_generated.h;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
 			};
@@ -507,12 +620,15 @@
 				CODE_SIGN_ENTITLEMENTS = Runner/Release.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = JBLHZ83X6T;
 				INFOPLIST_FILE = Runner/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = 12.3;
 				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_OBJC_BRIDGING_HEADER = Runner/bridge_generated.h;
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;

@@ -23,15 +23,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "android_system_properties"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "819e7219dbd41043ac279b19830f2efc897156490d7fd6ea916720117ee66311"
-dependencies = [
- "libc",
-]
-
-[[package]]
 name = "ansi_term"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -297,11 +288,10 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "chrono"
-version = "0.4.22"
+version = "0.4.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfd4d1b31faaa3a89d7934dbded3111da0d2ef28e3ebccdb4f0179f5929d1ef1"
+checksum = "6127248204b9aba09a362f6c930ef6a78f2c1b2215f8a7b398c06e1083f17af0"
 dependencies = [
- "iana-time-zone",
  "js-sys",
  "num-integer",
  "num-traits",
@@ -690,9 +680,9 @@ dependencies = [
 
 [[package]]
 name = "flutter_rust_bridge"
-version = "1.48.0"
+version = "1.49.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8ae1e29bf5e6fdead0d698a717340531b206e4d13474b6c6c6e95a62b78950d"
+checksum = "ed8b7f43f7c8293bc25feabe78403367c629a6459ccd05f3363040cb24912e8e"
 dependencies = [
  "allo-isolate",
  "anyhow",
@@ -1095,19 +1085,6 @@ dependencies = [
  "rustls",
  "tokio",
  "tokio-rustls",
-]
-
-[[package]]
-name = "iana-time-zone"
-version = "0.1.50"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd911b35d940d2bd0bea0f9100068e5b97b51a1cbe13d13382f132e0365257a0"
-dependencies = [
- "android_system_properties",
- "core-foundation-sys",
- "js-sys",
- "wasm-bindgen",
- "winapi",
 ]
 
 [[package]]
