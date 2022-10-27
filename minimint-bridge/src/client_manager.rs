@@ -7,6 +7,7 @@ use fedimint_api::BitcoinHash;
 use mint_client::api::WsFederationConnect;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 use tokio::sync::{Mutex, RwLock};
 
 use tokio::task::JoinHandle;
@@ -16,7 +17,7 @@ static DEFAULT_TREE_ID: &str = "__sled__default";
 
 pub struct ClientManager {
     clients: Arc<RwLock<HashMap<String, RwLock<Arc<Client>>>>>, // Maybe no RwLock for client Arc at all?
-    poller: Mutex<Option<JoinHandle<()>>>,
+    poller: JoinHandle<()>,
     db: Arc<SledDatabase>,
 }
 
@@ -25,9 +26,31 @@ pub struct ClientManager {
 
 impl ClientManager {
     pub fn new(db: Arc<SledDatabase>) -> ClientManager {
+        let clients: Arc<RwLock<HashMap<String, RwLock<Arc<Client>>>>> =
+            Arc::new(RwLock::new(HashMap::new()));
+        tracing::info!("initialising poller");
+
+        let poller = tokio::spawn({
+            let clients = clients.clone();
+            async move {
+                loop {
+                    tracing::info!("polling clients");
+                    let mut last_outgoing_check = SystemTime::now();
+                    let read_lock = clients.read().await;
+                    for (_key, value) in &*read_lock {
+                        let client_write_lock = value.write().await;
+                        tracing::info!("... {}", client_write_lock.label);
+                        client_write_lock.poll(&last_outgoing_check).await;
+                    }
+                    drop(read_lock);
+                    tokio::time::sleep(Duration::from_millis(1000)).await;
+                }
+            }
+        });
+
         ClientManager {
-            clients: Arc::new(RwLock::new(HashMap::new())),
-            poller: Mutex::new(None),
+            clients: clients,
+            poller: poller,
             db: db,
         }
     }
@@ -50,37 +73,19 @@ impl ClientManager {
                 Ok(client) => {
                     let client = Arc::new(client);
                     {
-                        let mut writeLock =
+                        let mut write_lock =
                             self.clients.try_write().expect("client map lock poisoned");
-                        writeLock.insert(
+                        write_lock.insert(
                             String::from(client_label.as_str()),
                             RwLock::new(client.clone()),
                         );
-                        drop(writeLock);
+                        drop(write_lock);
                     }
                     tracing::info!("loading client {}", client_label);
                 }
                 Err(e) => return Err(e),
             }
         }
-
-        /*
-        if self.poller.lock().await.is_none() {
-            tracing::info!("polling started");
-            *self.poller.lock().await = Some(tokio::spawn({
-                let clients = self.clients.clone();
-                async move {
-                    let readLock = clients.try_read().expect("client map lock poisoned");
-                    for (_key, value) in &*readLock {
-                        let clientReadLock = value.try_read().expect("client lock poisoned");
-                        tracing::info!("polling {}", clientReadLock.label);
-                        clientReadLock.poll().await;
-                    }
-                    drop(readLock);
-                }
-            }));
-        }
-         */
 
         Ok(())
     }
@@ -153,54 +158,24 @@ impl ClientManager {
             c.fetch_all_coins().await;
         }
         // for good measure, make sure the balance is updated (FIXME)
-        let mut writeLock = self.clients.write().await;
-        writeLock.insert(String::from(label), RwLock::new(client_arc.clone()));
-        drop(writeLock);
+        let mut write_lock = self.clients.write().await;
+        write_lock.insert(String::from(label), RwLock::new(client_arc.clone()));
+        drop(write_lock);
         tracing::info!("Client added {}", label);
-        /*
-        if self.poller.lock().await.is_none() {
-            tracing::info!("polling started");
 
-            *self.poller.lock().await = Some(tokio::spawn({
-                let clients = self.clients.clone();
-                async move {
-                    for (_key, value) in &*clients.read().await {
-                        tracing::info!("polling {}", value.read().await.label);
-                        value.read().await.poll().await;
-                    }
-                }
-            }));
-        }
-         */
         return Ok(client_arc.clone());
     }
 
     pub async fn remove_client(&self, label: &str) -> Result<()> {
         // Remove client at index
         tracing::info!("waiting for write lock {}", label);
-        let mut writeLock = self.clients.write().await;
-        let value = writeLock.remove(label);
-        drop(writeLock);
+        let mut write_lock = self.clients.write().await;
+        let value = write_lock.remove(label);
+        drop(write_lock);
         if value.is_none() {
             return Err(anyhow!("client does not exist"));
         }
         tracing::info!("Client removed {}", label);
-
-        /*
-        if self.clients.read().await.len() == 0 {
-            {
-                // Kill poller, when there are no more clients anymore
-                let poller = self.poller.lock().await;
-                tracing::info!("poller {:?}", poller);
-                if let Some(handle) = poller.as_ref() {
-                    handle.abort();
-                }
-
-                tracing::info!("polling stopped");
-            }
-            *self.poller.lock().await = None;
-        }
-         */
 
         Ok(())
     }

@@ -309,45 +309,88 @@ impl Client {
         }
     }
 
-    pub async fn poll(&self) {
+    pub async fn poll(&self, last_outgoing_check: &SystemTime) {
         // TODO.... try to reconnect client if connection status is NotConnected
-        let mut last_outgoing_check = SystemTime::now();
-        loop {
-            // Try to complete incoming payments
-            match self.client.as_ref() {
-                Some(client) => {
-                    let mut requests = self
-                        .list_payments()
+        // Try to complete incoming payments
+        match self.client.as_ref() {
+            Some(client) => {
+                tracing::info!("..... getting payments");
+                let mut requests = self
+                    .list_payments()
+                    .into_iter()
+                    // TODO: should we filter
+                    .filter(|payment| !payment.paid() && !payment.expired() && payment.incoming())
+                    .map(|payment| async move {
+                        // FIXME: don't create rng in here ...
+                        let invoice_expired = payment.invoice.is_expired();
+                        let rng = rand::rngs::OsRng::new().unwrap();
+                        let payment_hash = payment.invoice.payment_hash();
+                        tracing::debug!("fetching incoming contract {:?}", &payment_hash);
+                        let result = client
+                            .claim_incoming_contract(
+                                ContractId::from_hash(payment_hash.clone()),
+                                rng.clone(),
+                            )
+                            .await;
+                        if let Err(_) = result {
+                            tracing::debug!("couldn't complete payment: {:?}", &payment_hash);
+                            // Mark it "expired" in db if we couldn't claim it and invoice is expired
+                            if invoice_expired {
+                                self.update_payment_status(payment_hash, PaymentStatus::Expired);
+                            }
+                        } else {
+                            tracing::debug!("completed payment: {:?}", &payment_hash);
+                            self.update_payment_status(payment_hash, PaymentStatus::Paid);
+                            client.fetch_all_coins().await;
+                        }
+                    })
+                    .collect::<FuturesUnordered<_>>();
+
+                // FIXME: is there a better way to consume these futures?
+                while let Some(_) = requests.next().await {
+                    tracing::info!("completed api request");
+                }
+
+                // Only check outgoing payments once per minute
+                if last_outgoing_check
+                    .elapsed()
+                    .expect("Unix time not available")
+                    > Duration::from_secs(60)
+                {
+                    // Try to complete outgoing payments
+                    tracing::info!("..... checking outgoing payments");
+
+                    let consensus_block_height = match self.block_height().await {
+                        Ok(height) => height,
+                        Err(_) => {
+                            tracing::error!("failed to get block height");
+                            return;
+                        }
+                    };
+
+                    // TODO: only do this once per minute
+                    tracing::info!("looking for refunds...");
+                    let mut requests = client
+                        .ln_client()
+                        .refundable_outgoing_contracts(consensus_block_height)
                         .into_iter()
-                        // TODO: should we filter
-                        .filter(|payment| {
-                            !payment.paid() && !payment.expired() && payment.incoming()
-                        })
-                        .map(|payment| async move {
-                            // FIXME: don't create rng in here ...
-                            let invoice_expired = payment.invoice.is_expired();
-                            let rng = rand::rngs::OsRng::new().unwrap();
-                            let payment_hash = payment.invoice.payment_hash();
-                            tracing::debug!("fetching incoming contract {:?}", &payment_hash);
-                            let result = client
-                                .claim_incoming_contract(
-                                    ContractId::from_hash(payment_hash.clone()),
-                                    rng.clone(),
+                        .map(|contract| async move {
+                            tracing::info!(
+                                "attempting to get refund {:?}",
+                                contract.contract_account.contract.contract_id(),
+                            );
+                            match client
+                                .try_refund_outgoing_contract(
+                                    contract.contract_account.contract.contract_id(),
+                                    rand::rngs::OsRng::new().unwrap(),
                                 )
-                                .await;
-                            if let Err(_) = result {
-                                tracing::debug!("couldn't complete payment: {:?}", &payment_hash);
-                                // Mark it "expired" in db if we couldn't claim it and invoice is expired
-                                if invoice_expired {
-                                    self.update_payment_status(
-                                        payment_hash,
-                                        PaymentStatus::Expired,
-                                    );
+                                .await
+                            {
+                                Ok(_) => {
+                                    tracing::info!("got refund");
+                                    client.fetch_all_coins().await;
                                 }
-                            } else {
-                                tracing::debug!("completed payment: {:?}", &payment_hash);
-                                self.update_payment_status(payment_hash, PaymentStatus::Paid);
-                                client.fetch_all_coins().await;
+                                Err(e) => tracing::info!("refund failed {:?}", e),
                             }
                         })
                         .collect::<FuturesUnordered<_>>();
@@ -356,62 +399,11 @@ impl Client {
                     while let Some(_) = requests.next().await {
                         tracing::info!("completed api request");
                     }
-
-                    // Only check outgoing payments once per minute
-                    if last_outgoing_check
-                        .elapsed()
-                        .expect("Unix time not available")
-                        > Duration::from_secs(60)
-                    {
-                        // Try to complete outgoing payments
-                        let consensus_block_height = match self.block_height().await {
-                            Ok(height) => height,
-                            Err(_) => {
-                                tracing::error!("failed to get block height");
-                                continue;
-                            }
-                        };
-
-                        // TODO: only do this once per minute
-                        tracing::info!("looking for refunds...");
-                        let mut requests = client
-                            .ln_client()
-                            .refundable_outgoing_contracts(consensus_block_height)
-                            .into_iter()
-                            .map(|contract| async move {
-                                tracing::info!(
-                                    "attempting to get refund {:?}",
-                                    contract.contract_account.contract.contract_id(),
-                                );
-                                match client
-                                    .try_refund_outgoing_contract(
-                                        contract.contract_account.contract.contract_id(),
-                                        rand::rngs::OsRng::new().unwrap(),
-                                    )
-                                    .await
-                                {
-                                    Ok(_) => {
-                                        tracing::info!("got refund");
-                                        client.fetch_all_coins().await;
-                                    }
-                                    Err(e) => tracing::info!("refund failed {:?}", e),
-                                }
-                            })
-                            .collect::<FuturesUnordered<_>>();
-
-                        // FIXME: is there a better way to consume these futures?
-                        while let Some(_) = requests.next().await {
-                            tracing::info!("completed api request");
-                        }
-                        last_outgoing_check = SystemTime::now();
-                    }
-
-                    fedimint_api::task::sleep(std::time::Duration::from_secs(1)).await;
                 }
-                None => {
-                    fedimint_api::task::sleep(std::time::Duration::from_secs(1)).await;
-                    // TODO: reconnect code here
-                }
+            }
+            None => {
+                // TODO: reconnect code here
+                tracing::info!("...... Client is not connected");
             }
         }
     }
